@@ -282,6 +282,54 @@ it first on `DYLD_FALLBACK_LIBRARY_PATH`. It binds, but ANGLE still selects
 D3D11, so it did not change the outcome. Clearing Chromium's GPUCache /
 ShaderCache / `Local State` did not change the selection either.
 
+### THE TARGET CONFIGURATION IS NOW KNOWN
+
+Probing CrossOver's *running* Steam settled it. Their Steam has **no GPU process
+at all** -- only `utility` and `renderer`. It renders in software, in-process.
+Their webhelper command line (from `logs/webhelper.txt`):
+
+    --no-sandbox  --in-process-gpu  --disable-gpu
+    --use-angle=swiftshader-webgl  --use-gl=angle  --disable-gpu-compositing
+
+and `logs/webhelper_gpu.txt` says `Disabling GPU acceleration: Disabled/CommandLine`.
+
+So the fix was never a graphics translation layer. It is getting Chromium into
+software-SwiftShader mode with the GPU work inside the browser process.
+
+**Our working launch line so far:**
+
+    WINEDLLOVERRIDES="d3dcompiler_47=n;vulkan-1=n"
+    steam.exe -cef-disable-gpu -cef-disable-sandbox
+
+`vulkan-1=n` is essential and non-obvious: SwiftShader loads through CEF's own
+bundled `vulkan-1.dll`, and Wine's builtin winevulkan hijacks that name and then
+offers no usable device. `-cef-disable-gpu` alone leaves SwiftShader unable to
+initialise; `vulkan-1=n` alone lets ANGLE pick D3D11 instead. **Only both
+together** produce `Disabled/CommandLine` + zero graphics errors.
+
+That combination now reproduces every flag CrossOver has **except one**:
+
+| Flag | CrossOver | Ours |
+|---|---|---|
+| `--disable-gpu` / `--disable-gpu-compositing` | yes | yes |
+| `--use-angle=swiftshader-webgl` / `--use-gl=angle` | yes | yes |
+| `--no-sandbox` | yes | yes |
+| **`--in-process-gpu`** | yes | **NO** |
+| GPU process running | none | still spawns |
+
+Steam does not map `-cef-in-process-gpu`, so we cannot ask for it directly.
+Their Steam adds it on its own; ours does not. The window is still black, and
+this is the only remaining difference.
+
+### Next step
+Force `--in-process-gpu` into the webhelper. Steam builds that command line, so
+the practical route is a shim: rename `steamwebhelper.exe` and drop in a small
+launcher that re-execs the real binary with the extra flag appended. If the
+window renders, the flag is confirmed as the last piece, and we then look for a
+cleaner way to make Steam choose it (likely tied to GPU detection --
+`gldriverquery.exe` fails to load in our prefix, so Steam never learns there is
+no usable GPU).
+
 ### Next probe
 Determine which backend the *working* CrossOver Steam actually uses -- run its
 bottle and `vmmap` the live `steamwebhelper` for `vk_swiftshader` vs `d3d11`.
