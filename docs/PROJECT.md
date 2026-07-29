@@ -246,6 +246,47 @@ compare with what CrossOver's patched wined3d does.
    `WINEMAC_FWD_COMPAT_GL_CTX=1`. **It never fires** -- wined3d already gets
    4.1 -- so it is inert. Kept only for completeness; not the fix.
 
+### FEATURE LEVEL ANSWERED: capped at 9_3 by missing geometry shaders
+
+`dlls/wined3d/adapter_vk.c`, `feature_level_10_supported()`:
+
+```c
+return shader_model >= 4
+        && info->features2.features.multiViewport
+        && info->features2.features.geometryShader      /* <-- Metal has none */
+        && ...
+```
+
+Metal has no geometry shader stage, so any Vulkan-on-Metal driver (MoltenVK or
+KosmicKrisp) reports `geometryShader = FALSE`. wined3d therefore caps at
+**feature level 9_3**, ANGLE maps that to **GLES 2.0**, and Chromium needs 3.0.
+
+### The contradiction this creates
+
+CodeWeavers do **not** patch this check, and do **not** patch `winevulkan`
+(0 files changed) or `dxgi` (0 files changed). Their only nearby change sets
+`vk_info->multiple_viewports`, which is a different field and does not feed the
+feature-level test. So CrossOver's wined3d-on-Vulkan should cap at 9_3 too --
+yet their Steam renders with a completely clean cef_log.
+
+**Conclusion: their ANGLE is not going through D3D11 at all.** Most likely it
+succeeds on SwiftShader or its Vulkan backend. Our ANGLE keeps choosing D3D11
+and failing there.
+
+Note CrossOver ships `lib64/libMoltenVK.dylib` and **no ICD manifest**, so their
+winevulkan binds MoltenVK directly (Wine's configure falls back to
+`WINE_CHECK_SONAME(MoltenVK, ...)` when no loader is present) and never meets
+the loader's portability filter. Reproduced here with a shim -- symlinking
+`libvulkan.1.dylib -> libMoltenVK.dylib` in `runtimes/<rt>/vkshim/` and putting
+it first on `DYLD_FALLBACK_LIBRARY_PATH`. It binds, but ANGLE still selects
+D3D11, so it did not change the outcome. Clearing Chromium's GPUCache /
+ShaderCache / `Local State` did not change the selection either.
+
+### Next probe
+Determine which backend the *working* CrossOver Steam actually uses -- run its
+bottle and `vmmap` the live `steamwebhelper` for `vk_swiftshader` vs `d3d11`.
+That single observation decides whether to chase software rendering or D3D11.
+
 ### Also required regardless
 Native `d3dcompiler_47.dll`. Wine's builtin is a vkd3d-shader wrapper (1.1 MB);
 the real Microsoft one is 4.3 MB ("Microsoft (R) Optimizing Compiler"). ANGLE
