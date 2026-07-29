@@ -1,14 +1,42 @@
 diff --git a/dlls/winemac.drv/surface.c b/dlls/winemac.drv/surface.c
-index a849918d..0ae28d25 100644
+index a849918d..65290351 100644
 --- a/dlls/winemac.drv/surface.c
 +++ b/dlls/winemac.drv/surface.c
-@@ -86,6 +86,10 @@ static BOOL macdrv_surface_flush(struct window_surface *window_surface, const RE
+@@ -86,6 +86,38 @@ static BOOL macdrv_surface_flush(struct window_surface *window_surface, const RE
      CGColorSpaceRef colorspace;
      CGImageRef image;
  
 +    TRACE("hwnd %p, window %p, rect %s, dirty %s, alpha_mask %#x, bits %p, first px %#x\n",
 +          window_surface->hwnd, surface->window, wine_dbgstr_rect(rect), wine_dbgstr_rect(dirty),
 +          window_surface->alpha_mask, color_bits, color_bits ? *(const unsigned int *)color_bits : 0);
++
++    /* Debug aid: dump what we are actually handed, to settle whether missing
++     * content was never rasterised or is being lost on presentation. Writes
++     * raw BGRA plus a dimensions header; tools/probes/rawtopng.py renders it.
++     * Set WINE_DUMP_SURFACE to a directory to enable. */
++    if (color_bits)
++    {
++        static unsigned int dump_seq;
++        const char *dump_dir = getenv( "WINE_DUMP_SURFACE" );
++
++        if (dump_dir && dump_seq < 40)
++        {
++            int width = color_info->bmiHeader.biWidth;
++            int height = abs( color_info->bmiHeader.biHeight );
++            int stride = color_info->bmiHeader.biSizeImage / height;
++            char path[1024];
++            FILE *f;
++
++            snprintf( path, sizeof(path), "%s/surf-%p-%03u-%dx%d-%d.raw",
++                      dump_dir, window_surface->hwnd, dump_seq, width, height, stride );
++            if ((f = fopen( path, "wb" )))
++            {
++                fwrite( color_bits, 1, (size_t)stride * height, f );
++                fclose( f );
++                dump_seq++;
++            }
++        }
++    }
 +
      colorspace = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
      image = CGImageCreate(color_info->bmiHeader.biWidth, abs(color_info->bmiHeader.biHeight), 8, 32,

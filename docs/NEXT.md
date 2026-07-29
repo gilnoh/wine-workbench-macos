@@ -75,9 +75,40 @@ list below.
    CEF), `--disable-lcd-text --disable-font-subpixel-positioning`,
    `--in-process-gpu` with SwANGLE instead of `--disable-gpu`.
 
-   Next probe: find where Skia's raster output goes. A software-composited tile
-   containing text should reach the same surface as the button and QR code,
-   which do appear — so compare a tile that has text against one that does not.
+   **Settled by dumping the window surface** (`WINE_DUMP_SURFACE=<dir>`, see
+   `patches/wine-0005-*`, render with `tools/probes/rawtopng.py`):
+   `docs/evidence/steam-login-surface-no-text.png` is the exact bitmap Wine is
+   handed. It contains the logo, the input fields (with a text caret), the
+   checkbox, the button and the QR code — **and no glyphs at all**.
+
+   So `winemac.drv` presents faithfully; the text is never rasterised. That
+   rules out presentation, compositing and alpha handling entirely.
+
+   Comparing the `+dwrite` call profile against CrossOver on the *same prefix*
+   locates the divergence exactly:
+
+   | dwrite call            | ours | CrossOver |
+   | ---------------------- | ---- | --------- |
+   | `CreateFontFace`       |   66 |        66 |
+   | `TryGetFontTable`      |  485 |       491 |
+   | `GetColorPaletteCount` |   92 |       188 |
+   | `GlyphRunAnalysis`     |  **0** |  **1119** |
+   | `AlphaTexture`         |  **0** |   **373** |
+   | `GetGlyphRunOutline`   |  **0** |    **42** |
+
+   We call a *strict subset* of their dwrite functions (100 of 107) and nothing
+   they do not. Font enumeration, typeface creation and font-file I/O are within
+   a few percent. Skia sets fonts up identically and then never submits a single
+   glyph run for rasterisation.
+
+   Also ruled out: font-smoothing parameters — `SPI_GETFONTSMOOTHING{,TYPE,
+   CONTRAST,ORIENTATION}` and `LOGPIXELSX/Y`, `BITSPIXEL` are **identical** in
+   both Wines (`tools/probes/fontsmooth.c`).
+
+   Next probe: stop looking at Wine and ask Chromium. Inject its own logging via
+   the `WINE_APPEND_ARGS` hook, e.g.
+   `--enable-logging=stderr --v=1 --vmodule=*font*=2,*skia*=2,*text*=2`,
+   and compare against the same run under CrossOver's Wine.
 
 2. **Then formalise:** fold the working
    flags into `profiles/steam.env`, fix `bin/gamerun` (see below), and delete
