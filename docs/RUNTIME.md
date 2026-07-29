@@ -86,11 +86,25 @@ WINE_APPEND_ARGS="steamwebhelper.exe=--no-sandbox --in-process-gpu --disable-gpu
 ```
 
 **This is a workaround, not a fix.** The real fix is cross-process window
-surfaces in Wine, which is a substantial upstream change. A working hardware
-compositing path (e.g. `mesa_gl_to_metal`) might sidestep it, since GPU
-presentation does not go through the GDI blit — but that is unproven, and
-notably CrossOver has D3DMetal available and still runs Steam in-process
-software.
+drawing in Wine, which is a substantial upstream change.
+
+A better renderer would **not** help, and this is settled rather than assumed:
+`winemac.drv/opengl.c` carries the same per-process gate and states it outright —
+
+```c
+if (!(data = get_win_data(hwnd)))
+{
+    FIXME("DC for window %p of other process: not implemented\n", hwnd);
+    return FALSE;
+}
+```
+
+GDI fails silently with a throwaway surface; OpenGL fails loudly. So neither
+full OpenGL support nor `mesa_gl_to_metal` would let Chromium run without
+`--in-process-gpu`. The single condition is that Wine learn to present into a
+window owned by another process — shared window surfaces or foreign-HWND
+drawables, the same gap either way. Consistent with this, CrossOver has D3DMetal
+available and still runs Steam in-process software.
 
 ---
 
