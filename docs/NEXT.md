@@ -40,32 +40,84 @@ Both overrides are required and neither is obvious:
 
 ## Next actions, in order
 
-1. **Chase the `gldriverquery.exe` difference.** Our Steam logs
-   `ChildProcessQuery: failed with code -2` / `CGpuTopology: failed to run gpu
-   topology query` on every launch; CrossOver's logs nothing. That helper
-   imports `SDL2.dll`, which is missing from *both* prefixes — so why theirs
-   succeeds is unexplained and worth 20 minutes. Steam's `--in-process-gpu` and
-   `--enable-features=PlatformHEVCDecoderSupport` are both capability-detection
-   outcomes, so this is the likely lever.
-   Probe: run `Steam/bin/gldriverquery.exe` directly under both Wines and diff.
+1. **Find out why the shown window paints nothing.** This is now the whole
+   problem, and it is *not* a GPU-initialisation problem any more. With the
+   Vulkan fix below plus `-cef-disable-gpu -cef-disable-sandbox` we get:
+   - `cef_log.txt` graphics errors: **0** — the log is line-for-line identical
+     in shape to CrossOver's working one (no ANGLE, no EGL, no swapchain)
+   - the login window is created, titled `'Sign in to'`, and `WasHidden 0`
+   - and it is still a black rectangle.
 
-2. **If that dead-ends, force the flag with a shim.** Rename
-   `steamwebhelper.exe` → `steamwebhelper_real.exe` and drop in a small mingw
-   launcher that re-execs it with `--in-process-gpu` appended (only when the
-   command line has no `--type=`, so Chromium children are untouched). This
-   confirms whether the flag is genuinely the last piece. If it renders, then go
-   back and find the clean trigger.
+   So CEF believes it is compositing in software and presenting. The next place
+   to look is the *presentation* path, not the GL/Vulkan stack: how CEF's
+   software frame reaches the HWND, and what `winemac.drv` does with it.
+   Suggested probe: `WINEDEBUG=+bitblt,+winemac` on the browser process and see
+   whether any blit reaches the window at all; compare against CrossOver.
 
-3. **Then formalise:** move `d3dcompiler_47` to winetricks, fold the working
-   flags into `profiles/steam.env`, and delete the inert
-   `patches/wine-0001-macdrv-force-fwd-compat-gl-ctx.patch` (it never fires —
-   wined3d already gets a 4.1 core context).
+2. **Then formalise:** move `d3dcompiler_47` to winetricks, fold the working
+   flags into `profiles/steam.env`, fix `bin/gamerun` (see below), and delete
+   the inert `patches/wine-0001-macdrv-force-fwd-compat-gl-ctx.patch` (it never
+   fires — wined3d already gets a 4.1 core context).
+
+   **`bin/gamerun` bug:** it unconditionally sets `VK_ICD_FILENAMES` to the
+   portability-flagged MoltenVK ICD, which is exactly what hides the driver from
+   the Vulkan loader. It should not set the variable at all — the loader's
+   default search finds MoltenVK correctly.
 
 4. **Then the games** — Quasimorph (DXMT), Battleship Command (DXMT),
    Strategic Command WWII (D3D9, 32-bit → DXVK first for a baseline, then the
    `wined3d`→GL route into `mesa_gl_to_metal`).
 
+## Fixed this session (keep these)
+
+- **Wine `dlls/win32u/vulkan.c` dlopens a bare soname.** `dlopen("libvulkan.1.dylib")`
+  resolves only through `DYLD_FALLBACK_LIBRARY_PATH`, and dyld's default
+  fallback does not cover Homebrew (`~/lib` was tested too — also not searched).
+  Any process Wine spawns without that variable inherited therefore sees *no*
+  Vulkan: `vkEnumerateInstanceVersion` is missing, the caller assumes 1.0, and
+  gives up. Steam's `steamsysinfo.exe` GPU-topology helper is spawned exactly
+  that way, which is why it logged `vulkan instance version too old: 1.0.0`.
+  Fix: retry absolute Homebrew paths — `patches/wine-0002-win32u-vulkan-absolute-dylib-fallback.patch`.
+  **Genuinely upstreamable**, and it fixes far more than Steam.
+  Rebuild: only `win32u.so` is affected (patch the source, *not* `config.h` —
+  touching `config.h` forces a global rebuild).
+
+- **MoltenVK's ICD is `is_portability_driver: true`.** The Khronos loader hides
+  portability drivers from apps that do not opt into
+  `VK_KHR_portability_enumeration`; Steam does not, hence `VK_ERROR_INCOMPATIBLE_DRIVER`
+  (`res -9`). `/usr/local/etc/vulkan/icd.d/MoltenVK_icd.json` was a Homebrew
+  symlink into the Cellar; it is now a regular file with the flag removed.
+  Revert with `brew reinstall molten-vk`. **This is host state, not in the repo —
+  re-apply it after any `molten-vk` upgrade.**
+
+Together these make the topology query return `k_EGpuDriverId_MoltenVK`, exit 0,
+with no environment variables set at all.
+
 ## Do not re-chase these (measured and refuted)
+
+- *"`gldriverquery.exe` failing is the differentiator"* — it fails **identically**
+  in CrossOver's working bottle: exit `3221225781` = `STATUS_DLL_NOT_FOUND`
+  (the missing `SDL2.dll`). Also, it is not even the binary that runs the GPU
+  topology query — **`steamsysinfo.exe`** is.
+- *"`-cef-in-process-gpu` is a Steam option"* — not in this build. The complete
+  set is `-cef-disable-gpu`, `-cef-disable-gpu-sandbox`, `-cef-disable-sandbox`,
+  `-cef-disable-seccomp-sandbox`, `-cef-force-accessibility`, `-cef-force-gpu`,
+  `-no-cef-sandbox`. (`-noreactlogin` and `-cef-force-32bit` from old Reddit
+  threads are also absent — Valve removed them years ago.)
+- *"steam.exe appends `--in-process-gpu`"* — impossible: the string exists only
+  in `libcef.dll`, not in `steam.exe` or `steamui.dll`. **CEF appends it to its
+  own command line in-process**, which is why it lands after every other switch
+  and why children inherit it past `/prefetch:N`. There is no config, registry
+  key or CLI option to set it, and CrossOver's *first ever* run already had it.
+- *"Steam persists the GPU-off decision"* — no. CrossOver's bottle has never
+  logged `Disabling GPU` and has never spawned a `--type=gpu-process`.
+  `steam.exe`/`steamui.dll` are byte-identical to ours; registries match.
+- *"Shim `steamwebhelper.exe` to force the flag"* — **Steam self-heals its
+  binaries.** It restored both `steamwebhelper.exe` and `steamsysinfo.exe` to
+  their original size and mtime before launching. `chflags uchg` prevents the
+  restore, but then Steam refuses to launch the wrong-sized file; padding it to
+  the exact original size gets it launched but the process then produces no
+  window and no log. Not a viable route without more work.
 
 - *"winemac.drv never requests core profile"* — false; a trace shows wined3d
   getting a **4.1** context. The 2.1 reading came from a legacy context.
