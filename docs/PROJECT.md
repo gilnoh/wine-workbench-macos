@@ -102,6 +102,24 @@ sets this per runtime: `/usr/local/lib` for x86_64, `/opt/homebrew/lib` for arm6
 **Always pass `WINEPREFIX`.** Without it Wine silently initialises `~/.wine`,
 which is never what this tree wants.
 
+**Steam runs headless if CEF's GPU process dies.** Steam's whole UI is CEF
+(`steamwebhelper`). Under Wine, ANGLE cannot initialise — hardware Vulkan is
+rejected *and* software SwANGLE fails — so the GPU process exits and no window
+ever appears, while `steam.exe` keeps running happily. Symptom: the updater
+window flashes, then nothing, no icon, no error. Fix: `-cef-disable-gpu` in the
+profile's `ARGS`, which makes CEF rasterise on the CPU. Confirm success via
+`logs/steamui_html.txt` — you want `PopupHTMLWindow` followed by `BrowserReady`.
+
+**Wine's macOS windows are registered as "wine", not the app name.** Look for
+`wine` in the Dock / Cmd-Tab, not "Steam".
+
+**Homebrew hides the MoltenVK ICD.** It installs the manifest to
+`etc/vulkan/icd.d/`, not the standard `share/vulkan/icd.d/`, so loader
+autodiscovery finds no driver at all. `bin/common.sh` sets `VK_ICD_FILENAMES`
+explicitly. MoltenVK is also flagged `is_portability_driver`, so the loader
+still hides it from apps that don't opt in via `VK_KHR_portability_enumeration`
+— which is why Steam's ANGLE fails even with the ICD configured.
+
 **macOS ships bash 3.2**, where `${#arr[@]}` on a declared-but-empty array trips
 `set -u`. The scripts use `set -eo pipefail` and the `${arr[@]+"${arr[@]}"}` idiom.
 

@@ -42,6 +42,8 @@ env_args=(
     PATH="$BIN:$PATH"
     DYLD_FALLBACK_LIBRARY_PATH="$(runtime_dyld_path "$RUNTIME"):${DYLD_FALLBACK_LIBRARY_PATH:-/usr/lib}"
 )
+icd="$(runtime_vk_icd "$RUNTIME")"
+[ -f "$icd" ] && env_args+=( VK_ICD_FILENAMES="$icd" )
 [ -n "$ALL_OVERRIDES" ] && env_args+=( WINEDLLOVERRIDES="$ALL_OVERRIDES" )
 # ${arr[@]+"${arr[@]}"} expands to nothing when empty, safely on bash 3.2.
 env_args+=( ${BACKEND_ENV[@]+"${BACKEND_ENV[@]}"} )

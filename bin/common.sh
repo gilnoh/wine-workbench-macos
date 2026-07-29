@@ -40,6 +40,21 @@ runtime_dyld_path() {
     esac
 }
 
+# Vulkan ICD (driver) manifest. Wine links the Vulkan *loader*, but the loader
+# finds no driver unless pointed at one -- Homebrew installs MoltenVK's manifest
+# under etc/ rather than the standard share/vulkan/icd.d/, so autodiscovery
+# fails. Needed by DXVK, and by anything using ANGLE-on-Vulkan.
+#
+# Note MoltenVK declares is_portability_driver:true, so the loader hides it from
+# applications that do not opt in via VK_KHR_portability_enumeration. Setting
+# this is necessary but not always sufficient.
+runtime_vk_icd() {
+    case "$1" in
+        *-x86_64) echo "/usr/local/opt/molten-vk/etc/vulkan/icd.d/MoltenVK_icd.json" ;;
+        *)        echo "/opt/homebrew/opt/molten-vk/etc/vulkan/icd.d/MoltenVK_icd.json" ;;
+    esac
+}
+
 # NOTE: do NOT wrap wine in `arch -x86_64`.
 #
 # It is unnecessary -- a thin x86_64 binary is auto-translated by Rosetta when
