@@ -1,0 +1,17 @@
+# Meson NATIVE (build-machine) file for DXMT cross builds.
+#
+# DXMT's cross build produces two things: Windows PE DLLs (via mingw) and a
+# darwin "unixlib" (.so, really Mach-O). The unixlib must be x86_64 to load into
+# our x86_64 Wine, but this host is arm64.
+#
+# Upstream v0.80 dropped the build-osx.txt that used to cover this, and
+# DEVELOPMENT.md suggests `export CFLAGS='-arch x86_64'` instead -- but that
+# leaks into the mingw cross compiler, which errors with
+# "unrecognized command-line option '-arch'". Putting the flag on the native
+# binaries only keeps it off the cross compiler.
+
+[binaries]
+c = ['clang', '-arch', 'x86_64']
+cpp = ['clang++', '-arch', 'x86_64']
+objc = ['clang', '-arch', 'x86_64']
+objcpp = ['clang++', '-arch', 'x86_64']

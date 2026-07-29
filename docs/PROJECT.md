@@ -135,6 +135,43 @@ Wine 11.14, x86_64, `--enable-archs=i386,x86_64`, installed to
 - Shared library visible in-prefix as `S:\steamapps` — OK
 - Configured with: gnutls, freetype, vulkan, ffmpeg, both mingw targets
 
+## OPEN: Steam client UI renders black (2026-07-29)
+
+**Status: unresolved.** The Steam client runs, connects, loads its UI HTML and
+executes its JavaScript — but the window is a black rectangle.
+
+### Ruled out
+- **Wine build.** `notepad` renders perfectly (menus, scrollbar, status bar).
+  `winemac.so`, `opengl32.so`, `winevulkan.so`, `winecoreaudio.so` all present.
+  64-bit and 32-bit PE both execute.
+- **Network.** `connection_log.txt` shows `ConnectionCompleted()` and
+  "UDP - yes, TCP - yes, WebSocket - yes".
+- **Page load.** JS errors are reported from `steamloopback.host/library.js`,
+  so the UI document loads and runs.
+
+### Failure chain, and how far each fix got
+| Config | ANGLE result |
+|---|---|
+| builtin `vulkan-1`, MoltenVK ICD | Vulkan `error -9` (`VK_ERROR_INCOMPATIBLE_DRIVER`); SwANGLE also fails; **GPU process exits** |
+| `vulkan-1=n` (CEF's own loader) | switches to **D3D11**; `GLES 3.0 > max supported (2,0)` — wined3d feature level too low |
+| KosmicKrisp ICD | identical to above; ANGLE prefers D3D11 once reachable, so the Vulkan driver is never consulted |
+| **DXMT installed** | GLES cap **gone**; fails later at `SwapChain11::reset` `HRESULT 0x80004005` → `eglCreateWindowSurface: EGL_BAD_ALLOC` |
+| DXMT + `-cef-disable-gpu-compositing` | **zero ANGLE/EGL/SwapChain errors** — and still black |
+
+The last row is the important one: CEF reports no rendering errors at all, yet
+no pixels reach the window. That points at the CEF→Wine *presentation* path
+rather than ANGLE initialisation.
+
+Also tried: `-cef-disable-gpu` (black), Wine virtual desktop via
+`explorer /desktop=` (Steam does not finish starting at all).
+
+### Next candidates
+- Steam's legacy `cef.win7x64` build (a different, older rendering path) —
+  reachable by reporting Windows 7, though Steam dropped Win7 support.
+- An older Steam client package.
+- Bypass installation entirely with `steamcmd` (see below) and validate DXMT
+  against a real game, decoupling progress from this bug.
+
 ## Related work on this machine
 
 - `/Users/<user>/progs/mesa_gl_to_metal` — Mesa (zink + kosmickrisp) +

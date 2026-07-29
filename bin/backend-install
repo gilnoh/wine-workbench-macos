@@ -1,0 +1,56 @@
+#!/bin/bash
+# Install a graphics backend's libraries into a prefix (and its runtime).
+#
+#   bin/backend-install <backend> <prefix> [runtime]
+#
+# PE DLLs go into the prefix's system32, so each prefix picks its own backend.
+# Unix-side libraries (*.so) must live in the runtime tree instead -- Wine only
+# looks for unixlibs there. Those are additive and inert unless the matching PE
+# DLL is loaded, so sharing them across prefixes is safe.
+
+source "$(dirname "$0")/common.sh"
+
+BACKEND="${1:-}"
+PREFIX="${2:-}"
+RUNTIME="${3:-$DEFAULT_RUNTIME}"
+[ -n "$BACKEND" ] && [ -n "$PREFIX" ] || die "usage: backend-install <backend> <prefix> [runtime]"
+
+SRC="$BACKENDS_DIR/$BACKEND"
+[ -d "$SRC" ] || die "no backend '$BACKEND' at $SRC"
+PFX="$PREFIXES_DIR/$PREFIX"
+[ -d "$PFX" ] || die "no prefix '$PREFIX' -- run: bin/mkprefix $PREFIX"
+RT="$RUNTIMES_DIR/$RUNTIME"
+[ -d "$RT" ] || die "no runtime '$RUNTIME'"
+
+SYS32="$PFX/drive_c/windows/system32"
+SYSWOW="$PFX/drive_c/windows/syswow64"
+
+info "installing $BACKEND -> prefix:$PREFIX runtime:$RUNTIME"
+
+if [ -d "$SRC/x86_64-windows" ]; then
+    for f in "$SRC/x86_64-windows"/*.dll; do
+        [ -e "$f" ] || continue
+        cp -f "$f" "$SYS32/" && echo "    system32/$(basename "$f")"
+    done
+fi
+
+if [ -d "$SRC/i386-windows" ] && [ -d "$SYSWOW" ]; then
+    for f in "$SRC/i386-windows"/*.dll; do
+        [ -e "$f" ] || continue
+        cp -f "$f" "$SYSWOW/" && echo "    syswow64/$(basename "$f")"
+    done
+fi
+
+# Unixlibs land in the shared runtime. Record what we touched so the mutation
+# is traceable -- runtimes are otherwise treated as immutable.
+if [ -d "$SRC/x86_64-unix" ]; then
+    dest="$RT/lib/wine/x86_64-unix"
+    for f in "$SRC/x86_64-unix"/*.so; do
+        [ -e "$f" ] || continue
+        cp -f "$f" "$dest/" && echo "    RUNTIME x86_64-unix/$(basename "$f")"
+        echo "$(basename "$f")  <- $BACKEND  ($(date '+%Y-%m-%d %H:%M'))" \
+            >> "$RT/.backend-installs"
+    done
+fi
+
+info "done. Select it with BACKEND=\"$BACKEND\" in the profile."
