@@ -3,42 +3,16 @@
 Read `docs/PROJECT.md` first — design, decisions, gotchas, and the full Steam
 investigation including refuted theories. This file is only "what to do next".
 
-## State: everything works except the Steam client window
+## State: the window renders — but draws no text
 
 Working and verified:
 - `runtimes/wine-11.14-x86_64` — upstream Wine, `--enable-archs=i386,x86_64`,
-  64-bit **and** 32-bit PE execution, ffmpeg/gnutls/freetype/vulkan/mingw
+  64-bit **and** 32-bit PE execution, ffmpeg/gnutls/freetype/vulkan/mingw,
+  plus our four local patches (see "Fixed this session")
 - `backends/dxmt-0.80` — built from source against our own Wine tree
 - `bin/mkprefix`, `bin/gamerun`, `bin/backend-install`, `bin/killwine`,
-  `bin/compare-bottle`
+  `bin/compare-bottle`, `bin/vendor/winetricks`
 - `prefixes/steam-base` — Steam installed, updates, connects, loads its UI
-
-Not working: the Steam client renders a **black window**. Everything else about
-it is healthy — it connects, runs its JavaScript, creates the window.
-
-## The one remaining difference
-
-CrossOver's working Steam runs its CEF browser process with `--in-process-gpu`.
-Ours never does. Every other flag now matches.
-
-Our best launch line so far (matches CrossOver except that one flag, and
-produces `Disabling GPU acceleration: Disabled/CommandLine` with **zero**
-graphics errors):
-
-```sh
-WINEDLLOVERRIDES="d3dcompiler_47=n;vulkan-1=n" \
-  runtimes/wine-11.14-x86_64/bin/wine \
-  "C:\Program Files (x86)\Steam\steam.exe" -cef-disable-gpu -cef-disable-sandbox
-```
-
-Both overrides are required and neither is obvious:
-- `d3dcompiler_47=n` — Wine's builtin is a vkd3d-shader wrapper; ANGLE needs the
-  real 4.3 MB Microsoft compiler. Currently copied from the CrossOver bottle;
-  **replace with winetricks `d3dcompiler_47`** for a clean provenance.
-- `vulkan-1=n` — SwiftShader loads through CEF's *own* bundled `vulkan-1.dll`;
-  Wine's builtin winevulkan hijacks that name and then offers no usable device.
-
-## State: the window renders — but draws no text
 
 `bin/gamerun steam` (or the launch line in `profiles/steam.env`) now produces a
 real Steam login window: logo, input fields, checkbox, sign-in button, and a
@@ -77,7 +51,7 @@ live QR code. **Not one text glyph appears anywhere.**
    the Vulkan loader. It should not set the variable at all — the loader's
    default search finds MoltenVK correctly.
 
-4. **Then the games** — Quasimorph (DXMT), Battleship Command (DXMT),
+3. **Then the games** — Quasimorph (DXMT), Battleship Command (DXMT),
    Strategic Command WWII (D3D9, 32-bit → DXVK first for a baseline, then the
    `wined3d`→GL route into `mesa_gl_to_metal`).
 
