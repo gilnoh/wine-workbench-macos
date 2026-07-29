@@ -135,40 +135,68 @@ Wine 11.14, x86_64, `--enable-archs=i386,x86_64`, installed to
 - Shared library visible in-prefix as `S:\steamapps` — OK
 - Configured with: gnutls, freetype, vulkan, ffmpeg, both mingw targets
 
-## ROOT CAUSE FOUND: Steam black window = OpenGL 2.1 (2026-07-29)
+## OPEN: Steam client UI renders black (2026-07-29)
 
-**Stock Wine's `winemac.drv` exposes only OpenGL 2.1** (`GL_VERSION: 2.1 Metal - 90.5`
-on an M1 Max). macOS offers 4.1 only via a *core* profile, which upstream
-winemac.drv does not request. Everything follows from that:
+### CORRECTION: it is NOT simply "OpenGL 2.1"
 
-    GL 2.1  ->  wined3d can only claim D3D feature level 9_x
-            ->  ANGLE caps at GLES 2.0
-            ->  Chromium requires GLES 3.0
-            ->  GPU init fails, nothing composites, window is black
+An earlier revision of this file claimed stock winemac.drv exposing GL 2.1 was
+the root cause. That was overstated. `test_wine_gl.exe` requests a *legacy*
+context, and a legacy context is 2.1 on macOS **by definition** -- the number
+proves nothing about what wined3d obtains. wined3d is demonstrably alive: it
+creates contexts, identifies the Apple GPU, and reaches draw calls.
 
-`MaxVersionGL=0x00040001` does not help: wined3d cannot request more than the
-driver offers.
+### The actual observed fault
 
-**Why CrossOver works:** its Steam bottle uses *builtin wined3d* (verified --
-its d3d11.dll/dxgi.dll are "Wine builtin DLL", with no DXVK/DXMT/D3DMetal
-override and no Direct3D registry tuning), with the GPU **enabled** and a
-completely clean cef_log. CodeWeavers' patched winemac.drv simply gives
-wined3d a modern GL context. That patch is their advantage here.
+    err:d3d:wined3d_check_gl_call >>>>>>> GL_INVALID_FRAMEBUFFER_OPERATION (0x506)
+        from glClear @ dlls/wined3d/context_gl.c / 2246
 
-**Two routes to fix, both open:**
-1. `mesa_gl_to_metal` -- give Wine real OpenGL 4.6 via Mesa/zink/KosmicKrisp.
-   This is what that project was always for; Steam is a second consumer
-   besides Task Force Admiral, and a far lighter GL workload.
-2. DXMT -- bypasses GL entirely and *does* clear the feature-level hurdle
-   (the GLES 2.0 cap disappears), but then fails in `SwapChain11::reset`
-   with `HRESULT 0x80004005` -> `eglCreateWindowSurface: EGL_BAD_ALLOC`.
-   DXMT's own debug log stays empty, so this needs source-level work --
-   a genuine upstream contribution opportunity.
+An incomplete framebuffer in wined3d's macOS GL path. Also seen:
+`OpenGL implementation does not support GL_PRIMITIVE_RESTART_FIXED_INDEX`
+(a GL 4.3 feature; macOS caps at 4.1, so expected).
+
+### What the working CrossOver bottle proves
+
+Its Steam renders on **builtin wined3d** -- d3d11.dll/dxgi.dll are "Wine builtin
+DLL", no DXVK/DXMT/D3DMetal override, no Direct3D registry tuning, GPU enabled,
+and a completely clean cef_log. So the delta is inside CodeWeavers' patched
+Wine, not in bottle configuration.
+
+### Ruled out (measured, not assumed)
+- **Wine build correctness** -- notepad renders perfectly; 32- and 64-bit both run.
+- **Network** -- `ConnectionCompleted()`, UDP/TCP/WebSocket all reachable.
+- **Page load** -- JS executes from `steamloopback.host/library.js`.
+- **DirectComposition** -- Wine's dcomp.dll returns E_NOTIMPL from all three
+  entry points, so Chromium never takes that path.
+- **SDL2.dll** (missing for `gldriverquery.exe`) -- missing in the *working*
+  bottle too, so not the differentiator.
+- **Dropping in CrossOver's winemac.drv binary** -- impossible across versions:
+  `driver wants 108 but win32u has 110`. The driver is refused and no window
+  can be created.
+- **`MaxVersionGL`** -- no effect.
+
+### Progression of the ANGLE failure as layers were fixed
+| Config | ANGLE result |
+|---|---|
+| builtin vulkan-1 + MoltenVK | `error -9`; SwANGLE also fails; GPU process exits |
+| `vulkan-1=n` | switches to D3D11; `GLES 3.0 > max supported (2,0)` |
+| KosmicKrisp ICD | identical; ANGLE prefers D3D11, never consults Vulkan |
+| **DXMT** | GLES cap **gone**; fails at `SwapChain11::reset` `0x80004005` -> `EGL_BAD_ALLOC` |
+| DXMT + `-cef-disable-gpu-compositing` | zero ANGLE/EGL errors -- still black |
 
 **Also required regardless:** native `d3dcompiler_47.dll`. Wine's builtin is a
 vkd3d-shader wrapper (1.1 MB); the real Microsoft one is 4.3 MB
-("Microsoft (R) Optimizing Compiler"). ANGLE compiles its HLSL through it.
-CrossOver's bottle installs it. Install via winetricks `d3dcompiler_47`.
+("Microsoft (R) Optimizing Compiler"). ANGLE compiles HLSL through it, and the
+CrossOver bottle installs it. Now copied into our prefix; formalise via
+winetricks `d3dcompiler_47`.
+
+### Next candidates
+1. **CrossOver sources.** CodeWeavers publishes them (LGPL). Diff their
+   `dlls/winemac.drv` against upstream, port the delta as a patch. Legal,
+   maintainable, and exactly the kind of change worth upstreaming.
+2. **Fix `GL_INVALID_FRAMEBUFFER_OPERATION` directly** in wined3d's macOS path.
+3. **DXMT's DXGI swapchain gap** -- it already clears the feature-level hurdle;
+   only `SwapChain11` creation fails. Its debug log stays empty, so this needs
+   source-level work.
 
 ### Earlier status (superseded)
 **Status: was unresolved.** The Steam client runs, connects, loads its UI HTML and
