@@ -1,0 +1,55 @@
+#!/bin/bash
+# Diff a working CrossOver bottle against one of our prefixes.
+#
+#   bin/compare-bottle <crossover-bottle-name> [our-prefix]
+#
+# Used to answer "what does a bottle that actually works have that ours does
+# not" -- DLL overrides, native DLLs dropped into system32, installed runtimes.
+# Reference beats hypothesis.
+
+source "$(dirname "$0")/common.sh"
+
+BOTTLE="${1:-Steam}"
+PREFIX="${2:-steam-base}"
+
+CXB="$HOME/Library/Application Support/CrossOver/Bottles/$BOTTLE"
+PFX="$PREFIXES_DIR/$PREFIX"
+
+[ -d "$CXB" ] || die "no CrossOver bottle '$BOTTLE' at $CXB"
+[ -d "$PFX" ] || die "no prefix '$PREFIX'"
+
+echo "############ 1. DLL OVERRIDES ############"
+echo "--- CrossOver bottle ---"
+sed -n '/\[Software\\\\Wine\\\\DllOverrides\]/,/^\[/p' "$CXB/user.reg" 2>/dev/null | grep -E '^"' | sort
+echo "--- ours ---"
+sed -n '/\[Software\\\\Wine\\\\DllOverrides\]/,/^\[/p' "$PFX/user.reg" 2>/dev/null | grep -E '^"' | sort
+
+echo
+echo "############ 2. NATIVE DLLs IN system32 (in bottle, not in ours) ############"
+# A DLL present in the working bottle but absent from ours is a runtime we
+# never installed -- the most likely category of missing dependency.
+comm -23 \
+  <(ls "$CXB/drive_c/windows/system32" 2>/dev/null | sort) \
+  <(ls "$PFX/drive_c/windows/system32" 2>/dev/null | sort) \
+  | head -80
+
+echo
+echo "############ 3. BOTTLE CONFIG ############"
+cat "$CXB/cxbottle.conf" 2>/dev/null | head -40
+
+echo
+echo "############ 4. INSTALLED PACKAGES / VERBS ############"
+ls "$CXB/drive_c/windows/Installer" 2>/dev/null | head -20
+grep -riE "winetricks|verb|template" "$CXB/cxbottle.conf" 2>/dev/null | head -10
+
+echo
+echo "############ 5. WHICH CEF DID STEAM PICK ############"
+S="$CXB/drive_c/Program Files (x86)/Steam"
+ls "$S/bin/cef" 2>/dev/null
+grep -iE "cef|renderer|gpu" "$S/logs/console_log.txt" 2>/dev/null | tail -10
+echo "--- their cef_log errors (should be few/none if it works) ---"
+grep -icE "angle|egl|swapchain" "$S/logs/cef_log.txt" 2>/dev/null
+
+echo
+echo "############ 6. WINDOWS VERSION REPORTED ############"
+grep -iE "Windows|Startup" "$S/logs/bootstrap_log.txt" 2>/dev/null | tail -4
