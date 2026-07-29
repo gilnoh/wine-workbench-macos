@@ -12,3 +12,5 @@
 *.log
 .DS_Store
 /toolchains/
+/logs/
+/patches/winemac-backup/
