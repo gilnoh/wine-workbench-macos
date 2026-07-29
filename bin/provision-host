@@ -1,0 +1,90 @@
+#!/bin/bash
+# Host state this environment depends on that cannot live in the repository.
+#
+#   bin/provision-host           apply
+#   bin/provision-host --check   report only, exit 1 if anything is missing
+#
+# Idempotent. The MoltenVK step in particular must be re-run after any
+# `brew upgrade molten-vk`, because the upgrade restores Homebrew's own
+# manifest. See docs/RUNTIME.md.
+set -uo pipefail
+
+CHECK=0
+[ "${1:-}" = "--check" ] && CHECK=1
+
+BREW_X86=/usr/local/bin/brew
+BREW_ARM=/opt/homebrew/bin/brew
+ICD=/usr/local/etc/vulkan/icd.d/MoltenVK_icd.json
+
+# x86_64 Homebrew: Wine links these; the runtime is x86_64 under Rosetta.
+PKGS_X86="molten-vk vulkan-loader freetype gnutls bison mingw-w64 sdl2"
+# arm64 Homebrew: host-side tools only.
+PKGS_ARM="cabextract"
+
+fail=0
+note() { printf "  %-52s %s\n" "$1" "$2"; }
+
+echo "== Homebrew packages (x86_64, /usr/local) =="
+for p in $PKGS_X86; do
+    if "$BREW_X86" list --versions "$p" >/dev/null 2>&1; then
+        note "$p" "ok"
+    elif [ "$CHECK" = 1 ]; then
+        note "$p" "MISSING"; fail=1
+    else
+        note "$p" "installing..."
+        arch -x86_64 "$BREW_X86" install "$p" >/dev/null 2>&1 || { note "$p" "INSTALL FAILED"; fail=1; }
+    fi
+done
+
+echo "== Homebrew packages (arm64, /opt/homebrew) =="
+for p in $PKGS_ARM; do
+    if "$BREW_ARM" list --versions "$p" >/dev/null 2>&1; then
+        note "$p" "ok"
+    elif [ "$CHECK" = 1 ]; then
+        note "$p" "MISSING"; fail=1
+    else
+        note "$p" "installing..."
+        "$BREW_ARM" install "$p" >/dev/null 2>&1 || { note "$p" "INSTALL FAILED"; fail=1; }
+    fi
+done
+
+# MoltenVK's stock manifest is flagged is_portability_driver:true, which makes
+# the Khronos loader hide the driver from any application that does not request
+# VK_KHR_portability_enumeration. Steam does not, and concluded there was no GPU.
+echo "== MoltenVK ICD portability flag =="
+if [ ! -e "$ICD" ]; then
+    note "$ICD" "MISSING (is molten-vk installed?)"; fail=1
+elif ! grep -q 'is_portability_driver' "$ICD"; then
+    note "portability flag" "already stripped"
+elif [ "$CHECK" = 1 ]; then
+    note "portability flag" "STILL PRESENT -- run without --check"; fail=1
+else
+    lib=/usr/local/opt/molten-vk/lib/libMoltenVK.dylib
+    [ -e "$lib" ] || { note "libMoltenVK" "MISSING at $lib"; fail=1; }
+    rm -f "$ICD"
+    cat > "$ICD" <<EOF
+{
+    "file_format_version" : "1.0.0",
+    "ICD": {
+        "library_path": "$lib",
+        "api_version" : "1.4.0"
+    }
+}
+EOF
+    note "portability flag" "stripped (was a Homebrew symlink)"
+fi
+
+# Cheap end-to-end confirmation that the loader can actually see a device.
+echo "== Vulkan device visible to the loader =="
+if command -v /usr/local/bin/vulkaninfo >/dev/null 2>&1; then
+    dev=$(DYLD_FALLBACK_LIBRARY_PATH=/usr/local/lib:/usr/lib \
+          /usr/local/bin/vulkaninfo --summary 2>/dev/null | awk -F= '/deviceName/{print $2; exit}')
+    if [ -n "${dev:-}" ]; then note "deviceName" "${dev# }"; else note "enumeration" "NO DEVICE"; fail=1; fi
+else
+    note "vulkaninfo" "not installed (skipped)"
+fi
+
+echo
+if [ "$fail" = 0 ]; then echo "host provisioning OK"; else
+    echo "host provisioning INCOMPLETE"; exit 1
+fi
