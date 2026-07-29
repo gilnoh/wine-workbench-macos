@@ -1,0 +1,30 @@
+diff --git a/dlls/win32u/freetype.c b/dlls/win32u/freetype.c
+index 832043ab..487a0b07 100644
+--- a/dlls/win32u/freetype.c
++++ b/dlls/win32u/freetype.c
+@@ -1455,6 +1455,25 @@ static void load_mac_fonts(void)
+ static BOOL init_freetype(void)
+ {
+     ft_handle = dlopen(SONAME_LIBFREETYPE, RTLD_NOW);
++#ifdef __APPLE__
++    /* Same trap as the Vulkan loader: a bare soname resolves only through
++     * DYLD_FALLBACK_LIBRARY_PATH, whose default list does not cover Homebrew.
++     * A process that Wine spawns without inheriting that variable then has no
++     * FreeType, so every other primitive still draws but no glyph ever does --
++     * Steam's login window renders its images and controls and no text. */
++    if (!ft_handle)
++    {
++        static const char *const fallbacks[] =
++        {
++            "/usr/local/lib/" SONAME_LIBFREETYPE,     /* x86_64 Homebrew */
++            "/opt/homebrew/lib/" SONAME_LIBFREETYPE,  /* arm64 Homebrew  */
++        };
++        unsigned int i;
++
++        for (i = 0; i < ARRAY_SIZE(fallbacks) && !ft_handle; i++)
++            ft_handle = dlopen(fallbacks[i], RTLD_NOW);
++    }
++#endif
+     if(!ft_handle) {
+         WINE_MESSAGE(
+       "Wine cannot find the FreeType font library.  To enable Wine to\n"

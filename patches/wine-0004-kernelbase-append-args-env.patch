@@ -1,0 +1,48 @@
+diff --git a/dlls/kernelbase/process.c b/dlls/kernelbase/process.c
+index 25b3f4ff..29881fc1 100644
+--- a/dlls/kernelbase/process.c
++++ b/dlls/kernelbase/process.c
+@@ -562,6 +562,43 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR
+     info->hThread = info->hProcess = 0;
+     info->dwProcessId = info->dwThreadId = 0;
+ 
++    /* WINE_APPEND_ARGS="image.exe=--switches" appends switches to a matching
++     * child's command line, skipping Chromium's own children (--type=).
++     *
++     * Chromium's software compositor lives in the viz process and blits the
++     * rendered page into the target window's DC. Wine's window surfaces are
++     * per-process -- winemac.drv/surface.c hands a foreign hwnd a throwaway
++     * surface -- so those pixels never reach the screen and Steam's UI stays
++     * black. Forcing --in-process-gpu moves viz back into the browser process,
++     * where the blit lands in the window's real surface.
++     *
++     * A workaround, not a fix: the fix is cross-process window surfaces. */
++    {
++        WCHAR spec[512];
++
++        if (GetEnvironmentVariableW( L"WINE_APPEND_ARGS", spec, ARRAY_SIZE(spec) ))
++        {
++            WCHAR *eq = wcschr( spec, '=' );
++            const WCHAR *base = wcsrchr( app_name, '\\' );
++
++            base = base ? base + 1 : app_name;
++            if (eq && !wcsnicmp( base, spec, eq - spec ) && !base[eq - spec] &&
++                !wcsstr( tidy_cmdline, L"--type=" ))
++            {
++                SIZE_T len = lstrlenW( tidy_cmdline ) + lstrlenW( eq + 1 ) + 2;
++                WCHAR *appended = RtlAllocateHeap( GetProcessHeap(), 0, len * sizeof(WCHAR) );
++
++                if (appended)
++                {
++                    swprintf( appended, len, L"%s %s", tidy_cmdline, eq + 1 );
++                    if (tidy_cmdline != cmd_line) RtlFreeHeap( GetProcessHeap(), 0, tidy_cmdline );
++                    tidy_cmdline = appended;
++                    TRACE( "appended args, cmdline now %s\n", debugstr_w(tidy_cmdline) );
++                }
++            }
++        }
++    }
++
+     if (!(params = create_process_params( app_name, tidy_cmdline, cur_dir, env, flags, startup_info )))
+     {
+         status = STATUS_NO_MEMORY;

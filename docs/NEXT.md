@@ -38,23 +38,36 @@ Both overrides are required and neither is obvious:
 - `vulkan-1=n` — SwiftShader loads through CEF's *own* bundled `vulkan-1.dll`;
   Wine's builtin winevulkan hijacks that name and then offers no usable device.
 
+## State: the window renders — but draws no text
+
+`bin/gamerun steam` (or the launch line in `profiles/steam.env`) now produces a
+real Steam login window: logo, input fields, checkbox, sign-in button, and a
+live QR code. **Not one text glyph appears anywhere.**
+
 ## Next actions, in order
 
-1. **Find out why the shown window paints nothing.** This is now the whole
-   problem, and it is *not* a GPU-initialisation problem any more. With the
-   Vulkan fix below plus `-cef-disable-gpu -cef-disable-sandbox` we get:
-   - `cef_log.txt` graphics errors: **0** — the log is line-for-line identical
-     in shape to CrossOver's working one (no ANGLE, no EGL, no swapchain)
-   - the login window is created, titled `'Sign in to'`, and `WasHidden 0`
-   - and it is still a black rectangle.
+1. **Find out why no glyph is ever drawn.** Measured so far:
+   - Wine's own text stack is fine — `notepad` renders its title, menus and
+     status bar correctly in this very prefix.
+   - Fonts are installed (`bin/vendor/winetricks -q corefonts`, 31 files) and
+     DirectWrite enumerates **273 families** (CrossOver's bottle: 291).
+   - Chromium really does load them: `WINEDEBUG=+dwrite` shows 70
+     `GetFiles`, 2106 `localfontfileloader_CreateStreamFromKey` and 485
+     `TryGetFontTable` against `C:\windows\fonts\arial.ttf` and friends.
+   - But there are **zero** glyph-rasterisation calls — no
+     `CreateGlyphRunAnalysis`, no `CreateAlphaTexture`, no `GetGlyphRunOutline`.
+     So Skia is rasterising internally from the font bytes and the glyphs are
+     lost somewhere in raster/compositing, *not* in font lookup.
 
-   So CEF believes it is compositing in software and presenting. The next place
-   to look is the *presentation* path, not the GL/Vulkan stack: how CEF's
-   software frame reaches the HWND, and what `winemac.drv` does with it.
-   Suggested probe: `WINEDEBUG=+bitblt,+winemac` on the browser process and see
-   whether any blit reaches the window at all; compare against CrossOver.
+   Ruled out already: `DWriteEnable=0` (that key drives Steam's old GDI UI, not
+   CEF), `--disable-lcd-text --disable-font-subpixel-positioning`,
+   `--in-process-gpu` with SwANGLE instead of `--disable-gpu`.
 
-2. **Then formalise:** move `d3dcompiler_47` to winetricks, fold the working
+   Next probe: find where Skia's raster output goes. A software-composited tile
+   containing text should reach the same surface as the button and QR code,
+   which do appear — so compare a tile that has text against one that does not.
+
+2. **Then formalise:** fold the working
    flags into `profiles/steam.env`, fix `bin/gamerun` (see below), and delete
    the inert `patches/wine-0001-macdrv-force-fwd-compat-gl-ctx.patch` (it never
    fires — wined3d already gets a 4.1 core context).
@@ -69,6 +82,27 @@ Both overrides are required and neither is obvious:
    `wined3d`→GL route into `mesa_gl_to_metal`).
 
 ## Fixed this session (keep these)
+
+- **Wine's window surfaces are per-process — this was the black window.**
+  Proven with `WINEDEBUG=+pid,+bitblt`: the CEF browser process (pid `0138`)
+  creates and flushes the login window's surface, while the viz/GPU process
+  (pid `01e8`) performs all 459 content blits including six full 700x440
+  paints. `winemac.drv/surface.c` hands a foreign hwnd a throwaway surface
+  (`if (!(data = get_win_data(hwnd))) return TRUE; /* use default surface */`),
+  so the page was drawn perfectly into a bitmap nobody displays. Windows allows
+  cross-process window painting; Wine silently discards it.
+  `--in-process-gpu` makes viz a *thread* of the browser process, which is why
+  CrossOver works. Injected via
+  `patches/wine-0004-kernelbase-append-args-env.patch` (`WINE_APPEND_ARGS`),
+  because Steam restores its own binaries on launch and a shim exe cannot
+  survive. **This is a workaround; the real fix is cross-process window
+  surfaces in Wine, which is a substantial upstream change.**
+
+- **Wine's FreeType dlopen has the same bare-soname bug as Vulkan.**
+  `patches/wine-0003-win32u-freetype-absolute-dylib-fallback.patch`. Also
+  upstreamable. (It was not the cause of the missing text — `notepad` proves
+  Wine text works — but it is a real bug: any process spawned without
+  `DYLD_FALLBACK_LIBRARY_PATH` had no FreeType at all.)
 
 - **Wine `dlls/win32u/vulkan.c` dlopens a bare soname.** `dlopen("libvulkan.1.dylib")`
   resolves only through `DYLD_FALLBACK_LIBRARY_PATH`, and dyld's default
@@ -141,3 +175,31 @@ Steam (`ps -ww -o args=`, its `logs/webhelper.txt`, `logs/webhelper_gpu.txt`).
 Reading a working reference beat inferring causes from error messages, which
 produced three wrong theories. When stuck again: find the working system and
 read what it actually does.
+
+## Open question: why does CEF add `--in-process-gpu` for CrossOver and not us?
+
+Unresolved, and worth knowing rather than working around. CEF appends the
+switch to its own command line in-process (the string exists only in
+`libcef.dll`). CrossOver gets it on a *fresh* bottle's first run; we never do.
+
+Tested and refuted: that Chromium decides from a browser-side D3D/DXGI probe.
+Disabling `dxgi`/`d3d11`/`d3d10` for the prefix did **not** trigger it — it made
+Chromium crash-loop the GPU process 11 times instead.
+
+## Host state that is NOT in this repo
+
+- `/usr/local/etc/vulkan/icd.d/MoltenVK_icd.json` — was a Homebrew symlink with
+  `is_portability_driver: true`; replaced by a regular file without the flag.
+  **Re-apply after any `brew upgrade molten-vk`** (`brew reinstall molten-vk`
+  restores the original).
+- `cabextract` (Homebrew) — required by winetricks.
+- Fonts installed into `prefixes/steam-base` with
+  `bin/vendor/winetricks -q corefonts`.
+
+## Runtime backups
+
+Patched binaries in `runtimes/wine-11.14-x86_64` keep their originals beside
+them: `win32u.so.pre-vkfix`, `ntdll.so.pre-vkfix`, `winemac.so.pre-trace`,
+`kernelbase.dll.pre-inject` (both `x86_64-windows` and `i386-windows`).
+`patches/wine-0005-winemac-surface-flush-trace.patch` is a debugging TRACE only
+-- drop it once the text bug is closed.

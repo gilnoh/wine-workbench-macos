@@ -1,0 +1,15 @@
+diff --git a/dlls/winemac.drv/surface.c b/dlls/winemac.drv/surface.c
+index a849918d..0ae28d25 100644
+--- a/dlls/winemac.drv/surface.c
++++ b/dlls/winemac.drv/surface.c
+@@ -86,6 +86,10 @@ static BOOL macdrv_surface_flush(struct window_surface *window_surface, const RE
+     CGColorSpaceRef colorspace;
+     CGImageRef image;
+ 
++    TRACE("hwnd %p, window %p, rect %s, dirty %s, alpha_mask %#x, bits %p, first px %#x\n",
++          window_surface->hwnd, surface->window, wine_dbgstr_rect(rect), wine_dbgstr_rect(dirty),
++          window_surface->alpha_mask, color_bits, color_bits ? *(const unsigned int *)color_bits : 0);
++
+     colorspace = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+     image = CGImageCreate(color_info->bmiHeader.biWidth, abs(color_info->bmiHeader.biHeight), 8, 32,
+                           color_info->bmiHeader.biSizeImage / abs(color_info->bmiHeader.biHeight), colorspace,
