@@ -3,150 +3,75 @@
 Read `docs/PROJECT.md` first — design, decisions, gotchas, and the full Steam
 investigation including refuted theories. This file is only "what to do next".
 
-## State: the window renders — but draws no text
+## State: the Steam client window renders, text and all
+
+`bin/gamerun steam` produces a complete, readable Steam login window: account
+name and password fields with labels, "Remember me", the Sign in button, the QR
+panel and its instructions, and the footer links.
+Evidence: `docs/evidence/steam-login-rendered.png`.
 
 Working and verified:
 - `runtimes/wine-11.14-x86_64` — upstream Wine, `--enable-archs=i386,x86_64`,
   64-bit **and** 32-bit PE execution, ffmpeg/gnutls/freetype/vulkan/mingw,
-  plus our four local patches (see "Fixed this session")
+  plus our local patches (see "Fixed")
 - `backends/dxmt-0.80` — built from source against our own Wine tree
 - `bin/mkprefix`, `bin/gamerun`, `bin/backend-install`, `bin/killwine`,
-  `bin/compare-bottle`, `bin/vendor/winetricks`
-- `prefixes/steam-base` — Steam installed, updates, connects, loads its UI
-
-`bin/gamerun steam` (or the launch line in `profiles/steam.env`) now produces a
-real Steam login window: logo, input fields, checkbox, sign-in button, and a
-live QR code. **Not one text glyph appears anywhere.**
-
-## Both remaining bugs are Wine code, not our prefix — measured
-
-The decisive experiment: run the **same prefix** under three different Wines.
-
-| Wine (all on `prefixes/steam-*`, same fonts/registry/Steam install) | in-process-gpu | text |
-| ---------------------------------------------------------------- | -------------- | ---- |
-| ours, 11.14 + our patches                                          | no             | no   |
-| pristine upstream 11.0 (`runtimes/wine-11.0-x86_64`)               | no             | —    |
-| **CrossOver 26.3 (also Wine 11.0)**                                | **yes**        | **yes** |
-
-So the prefix is exonerated, and — because upstream 11.0 fails while CrossOver's
-Wine 11.0 succeeds — **the cause is certainly inside CodeWeavers' patch set**,
-and the *same* patch set fixes both symptoms.
-
-CrossOver's delta vs upstream 11.0 (`src/crossover/sources/wine`, extracted from
-`crossover-sources-26.3.0.tar.gz`):
-
-```
-23 ntdll   17 winemac.drv   17 win32u   13 server   13 wined3d
- 8 kernelbase   6 winebus.sys   4 wow64/winhttp/user32/shell32/...   1 dwrite
-```
-
-**Next: build their tree, confirm it renders, then bisect by reverting component
-groups** (~4 builds by halving). That resolves both bugs in one pass against a
-bounded delta. Carry back only the responsible change — not their patch stack.
-
-Reference kept on disk: `prefixes/steam-cxtest`, in which CrossOver's Wine
-renders Steam fully. To run it, symlink that prefix into
-`~/Library/Application Support/CrossOver/Bottles/<name>`, drop a `cxbottle.conf`
-in it (copy from their Steam bottle), then
-`wine --bottle <name> --no-update --start "C:\Program Files (x86)\Steam\steam.exe"`.
-CrossOver's `wine` ignores `WINEPREFIX` — it is bottle-based.
-
-Probes for this kind of comparison live in `tools/probes/` (Vulkan loader,
-DirectWrite font collection, DXGI adapter). Reading a working reference has
-produced every real finding; inferring from error messages produced the refuted
-list below.
+  `bin/compare-bottle`, `bin/vendor/winetricks`, `tools/probes/`
+- `prefixes/steam-base` — Steam installed, updates, connects, renders
 
 ## Next actions, in order
 
-1. **Find out why no glyph is ever drawn.** Measured so far:
-   - Wine's own text stack is fine — `notepad` renders its title, menus and
-     status bar correctly in this very prefix.
-   - Fonts are installed (`bin/vendor/winetricks -q corefonts`, 31 files) and
-     DirectWrite enumerates **273 families** (CrossOver's bottle: 291).
-   - Chromium really does load them: `WINEDEBUG=+dwrite` shows 70
-     `GetFiles`, 2106 `localfontfileloader_CreateStreamFromKey` and 485
-     `TryGetFontTable` against `C:\windows\fonts\arial.ttf` and friends.
-   - But there are **zero** glyph-rasterisation calls — no
-     `CreateGlyphRunAnalysis`, no `CreateAlphaTexture`, no `GetGlyphRunOutline`.
-     So Skia is rasterising internally from the font bytes and the glyphs are
-     lost somewhere in raster/compositing, *not* in font lookup.
+1. **Log in and confirm the client works end to end** — library, downloads,
+   launching a game.
 
-   Ruled out already: `DWriteEnable=0` (that key drives Steam's old GDI UI, not
-   CEF), `--disable-lcd-text --disable-font-subpixel-positioning`,
-   `--in-process-gpu` with SwANGLE instead of `--disable-gpu`.
+2. **Formalise:** fix `bin/gamerun` (it still sets `VK_ICD_FILENAMES` to the
+   portability-flagged MoltenVK ICD, the very thing that hides the driver — it
+   should not set the variable at all), delete the inert
+   `patches/wine-0001-macdrv-force-fwd-compat-gl-ctx.patch`, and drop the
+   debugging TRACE/dump patch `wine-0005` once it is no longer wanted.
+   Stale DXMT DLLs sit in `prefixes/steam-base/drive_c/windows/system32`
+   (`dxgi`, `d3d11`, `d3d10core`) from an old backend install; Wine loads its
+   builtins so they are inert, but they should be cleaned up.
 
-   **Settled by dumping the window surface** (`WINE_DUMP_SURFACE=<dir>`, see
-   `patches/wine-0005-*`, render with `tools/probes/rawtopng.py`):
-   `docs/evidence/steam-login-surface-no-text.png` is the exact bitmap Wine is
-   handed. It contains the logo, the input fields (with a text caret), the
-   checkbox, the button and the QR code — **and no glyphs at all**.
+3. **Send the three dlopen fixes upstream** — `wine-0002` (win32u vulkan),
+   `wine-0003` (win32u freetype), `wine-0006` (dwrite freetype). One bug class,
+   three sites, all real and none macOS-Steam-specific.
 
-   So `winemac.drv` presents faithfully; the text is never rasterised. That
-   rules out presentation, compositing and alpha handling entirely.
-
-   Comparing the `+dwrite` call profile against CrossOver on the *same prefix*
-   locates the divergence exactly:
-
-   | dwrite call            | ours | CrossOver |
-   | ---------------------- | ---- | --------- |
-   | `CreateFontFace`       |   66 |        66 |
-   | `TryGetFontTable`      |  485 |       491 |
-   | `GetColorPaletteCount` |   92 |       188 |
-   | `GlyphRunAnalysis`     |  **0** |  **1119** |
-   | `AlphaTexture`         |  **0** |   **373** |
-   | `GetGlyphRunOutline`   |  **0** |    **42** |
-
-   We call a *strict subset* of their dwrite functions (100 of 107) and nothing
-   they do not. Font enumeration, typeface creation and font-file I/O are within
-   a few percent. Skia sets fonts up identically and then never submits a single
-   glyph run for rasterisation.
-
-   Also ruled out: font-smoothing parameters — `SPI_GETFONTSMOOTHING{,TYPE,
-   CONTRAST,ORIENTATION}` and `LOGPIXELSX/Y`, `BITSPIXEL` are **identical** in
-   both Wines (`tools/probes/fontsmooth.c`).
-
-   **Only Chromium's DirectWrite path is affected.** Wine's GDI text is fine:
-   `notepad` renders, and Steam's own native updater dialog renders
-   "Updating Steam...", "Verifying installation...", "Cancel" correctly --
-   `docs/evidence/steam-updater-surface-with-text.png`, captured from the same
-   surface-dump run that produced the empty login window.
-
-   Per-process attribution (`WINEDEBUG=+pid,+dwrite`) shows the **renderer**
-   does the typeface work and then stops: it registers 15 custom web fonts
-   (`CreateCustomFontFileReference` / `dwritefontsetbuilder1_AddFontFile`),
-   creates faces, reads tables, calls `GetGlyphCount`, and its final calls are a
-   run of `dwritefontface2_GetColorPaletteCount` -- exactly where CrossOver's
-   renderer continues on to `GetDesignGlyphMetrics` -> `GetMetrics` ->
-   `CreateGlyphRunAnalysis`.
-
-   Further ruled out:
-   - **web fonts** -- `--disable-remote-fonts` changes nothing, so Motiva Sans
-     is not the problem despite the 15 custom font registrations.
-   - **the one CrossOver dwrite patch** (CXHACK forcing
-     `DWRITE_RENDERING_MODE_OUTLINE` off, bug 14558/14721) is irrelevant:
-     **neither** Wine calls `GetRecommendedRenderingMode` at all.
-   - **Chromium's own logging** -- `--vmodule=dwrite_font_proxy*,dwrite_font_lookup*,
-     font_fallback*` emits nothing; those paths are not exercised.
-
-   Next probe: re-run CrossOver with `+pid` and compare **renderer to renderer**.
-   Their 1119 `CreateGlyphRunAnalysis` calls have not been attributed to a
-   process yet -- if they come from the browser rather than the renderer, then
-   rasterisation happens somewhere structurally different, which would explain
-   why our renderer simply never asks.
-
-2. **Then formalise:** fold the working
-   flags into `profiles/steam.env`, fix `bin/gamerun` (see below), and delete
-   the inert `patches/wine-0001-macdrv-force-fwd-compat-gl-ctx.patch` (it never
-   fires — wined3d already gets a 4.1 core context).
-
-   **`bin/gamerun` bug:** it unconditionally sets `VK_ICD_FILENAMES` to the
-   portability-flagged MoltenVK ICD, which is exactly what hides the driver from
-   the Vulkan loader. It should not set the variable at all — the loader's
-   default search finds MoltenVK correctly.
-
-3. **Then the games** — Quasimorph (DXMT), Battleship Command (DXMT),
+4. **Then the games** — Quasimorph (DXMT), Battleship Command (DXMT),
    Strategic Command WWII (D3D9, 32-bit → DXVK first for a baseline, then the
    `wined3d`→GL route into `mesa_gl_to_metal`).
+
+## THE text bug: dwrite has its own FreeType handle
+
+`dlls/dwrite/freetype.c` does `dlopen(SONAME_LIBFREETYPE)` — a **second,
+independent** FreeType loader from the one in `dlls/win32u/freetype.c`. Patching
+only win32u fixed GDI text and left DirectWrite text broken.
+
+It fails **silently and invisibly**: `DWriteCreateFactory`, `CreateFontFace` and
+`CreateGlyphRunAnalysis` all return `S_OK`, and `GetAlphaTextureBounds` simply
+reports `0x0`. Skia asks for the glyph box, is told the glyph is empty, and never
+rasterises. Result: a Chromium app draws its entire UI — images, controls,
+gradients, even the text caret — with no text at all, while GDI text elsewhere in
+the same prefix works perfectly.
+
+Fix: `patches/wine-0006-dwrite-freetype-absolute-dylib-fallback.patch`.
+Verify with `tools/probes/glyphprobe.cpp`, which rasterises one glyph the way
+Skia does:
+
+```
+broken:  GetAlphaTextureBounds(1x1) hr=0 bounds=(0,0)-(0,0)   0x0
+fixed:   GetAlphaTextureBounds(1x1) hr=0 bounds=(-1,-12)-(11,0) 12x12
+         CreateAlphaTexture(1x1)    hr=0 non-zero bytes = 65 / 144
+```
+
+The fixed numbers are identical to CrossOver's, byte for byte.
+
+**Not a regression** — pristine upstream Wine 11.0 fails the same way. CrossOver
+escapes it only because they bundle FreeType, so their bare soname resolves.
+Their `dlls/dwrite/freetype.c` is unmodified from upstream.
+
+The clue was in the trace all along: `process_attach` appeared in CrossOver's
+dwrite call set and never in ours. That *is* this function.
 
 ## Fixed this session (keep these)
 

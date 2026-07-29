@@ -1,0 +1,32 @@
+diff --git a/dlls/dwrite/freetype.c b/dlls/dwrite/freetype.c
+index 13d9a079..095526bb 100644
+--- a/dlls/dwrite/freetype.c
++++ b/dlls/dwrite/freetype.c
+@@ -116,6 +116,27 @@ static NTSTATUS process_attach(void *args)
+     FT_Version_t FT_Version;
+ 
+     ft_handle = dlopen(SONAME_LIBFREETYPE, RTLD_NOW);
++#ifdef __APPLE__
++    /* dwrite keeps its own FreeType handle, separate from win32u's, and a bare
++     * soname resolves only through DYLD_FALLBACK_LIBRARY_PATH, whose default
++     * list does not cover Homebrew. Without it every DirectWrite glyph run
++     * analysis silently produces an empty alpha texture -- CreateGlyphRunAnalysis
++     * still returns S_OK, GetAlphaTextureBounds just reports 0x0 -- so a
++     * DirectWrite client such as Chromium draws its whole UI except the text,
++     * while GDI text keeps working. Retry the usual absolute locations. */
++    if (!ft_handle)
++    {
++        static const char *const fallbacks[] =
++        {
++            "/usr/local/lib/" SONAME_LIBFREETYPE,     /* x86_64 Homebrew */
++            "/opt/homebrew/lib/" SONAME_LIBFREETYPE,  /* arm64 Homebrew  */
++        };
++        unsigned int i;
++
++        for (i = 0; i < ARRAY_SIZE(fallbacks) && !ft_handle; i++)
++            ft_handle = dlopen(fallbacks[i], RTLD_NOW);
++    }
++#endif
+     if (!ft_handle)
+     {
+         WINE_MESSAGE("Wine cannot find the FreeType font library.\n");
