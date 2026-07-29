@@ -14,3 +14,6 @@
 /toolchains/
 /logs/
 /patches/winemac-backup/
+
+# probe binaries (rebuild with tools/probes/build.sh)
+tools/probes/*.exe

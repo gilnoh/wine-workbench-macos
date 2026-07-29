@@ -18,6 +18,44 @@ Working and verified:
 real Steam login window: logo, input fields, checkbox, sign-in button, and a
 live QR code. **Not one text glyph appears anywhere.**
 
+## Both remaining bugs are Wine code, not our prefix — measured
+
+The decisive experiment: run the **same prefix** under three different Wines.
+
+| Wine (all on `prefixes/steam-*`, same fonts/registry/Steam install) | in-process-gpu | text |
+| ---------------------------------------------------------------- | -------------- | ---- |
+| ours, 11.14 + our patches                                          | no             | no   |
+| pristine upstream 11.0 (`runtimes/wine-11.0-x86_64`)               | no             | —    |
+| **CrossOver 26.3 (also Wine 11.0)**                                | **yes**        | **yes** |
+
+So the prefix is exonerated, and — because upstream 11.0 fails while CrossOver's
+Wine 11.0 succeeds — **the cause is certainly inside CodeWeavers' patch set**,
+and the *same* patch set fixes both symptoms.
+
+CrossOver's delta vs upstream 11.0 (`src/crossover/sources/wine`, extracted from
+`crossover-sources-26.3.0.tar.gz`):
+
+```
+23 ntdll   17 winemac.drv   17 win32u   13 server   13 wined3d
+ 8 kernelbase   6 winebus.sys   4 wow64/winhttp/user32/shell32/...   1 dwrite
+```
+
+**Next: build their tree, confirm it renders, then bisect by reverting component
+groups** (~4 builds by halving). That resolves both bugs in one pass against a
+bounded delta. Carry back only the responsible change — not their patch stack.
+
+Reference kept on disk: `prefixes/steam-cxtest`, in which CrossOver's Wine
+renders Steam fully. To run it, symlink that prefix into
+`~/Library/Application Support/CrossOver/Bottles/<name>`, drop a `cxbottle.conf`
+in it (copy from their Steam bottle), then
+`wine --bottle <name> --no-update --start "C:\Program Files (x86)\Steam\steam.exe"`.
+CrossOver's `wine` ignores `WINEPREFIX` — it is bottle-based.
+
+Probes for this kind of comparison live in `tools/probes/` (Vulkan loader,
+DirectWrite font collection, DXGI adapter). Reading a working reference has
+produced every real finding; inferring from error messages produced the refuted
+list below.
+
 ## Next actions, in order
 
 1. **Find out why no glyph is ever drawn.** Measured so far:
@@ -177,3 +215,25 @@ them: `win32u.so.pre-vkfix`, `ntdll.so.pre-vkfix`, `winemac.so.pre-trace`,
 `kernelbase.dll.pre-inject` (both `x86_64-windows` and `i386-windows`).
 `patches/wine-0005-winemac-surface-flush-trace.patch` is a debugging TRACE only
 -- drop it once the text bug is closed.
+
+## Also refuted this round (environmental guesses, all reverted)
+
+- *"upstream regression between 11.0 and 11.14"* — no. Pristine upstream 11.0
+  behaves identically to our 11.14: `Disabling GPU acceleration due to runtime
+  detect`, 3 gpu-process spawns, no `--in-process-gpu`.
+- *"CrossOver injects the switch somewhere"* — no. **Zero** matches for
+  `in-process-gpu` in their entire Wine source. Their `kernelbase/process.c`
+  patch is game hacks only (Epic launcher desktop, a powershell block keyed on
+  one `SteamGameId`, Wow64 spoofing).
+- *"the AMD GPU spoof is the trigger"* — CrossOver reports vendor `0x1002`
+  device `0x66af` ("AMD Compatibility Mode") where we report Apple `0x106b`.
+  Reproduced exactly via Wine's own `HKCU\Software\Wine\Direct3D`
+  `VideoPciVendorID`/`VideoPciDeviceID` — CEF still did not add the switch.
+  (It did help: gpu-process spawns 3 -> 1, and the runtime-detect churn stopped.)
+- *"CW HACK 18311 / wined3d Vulkan renderer"* — reproduced without patching via
+  `HKCU\Software\Wine\Direct3D` `renderer=vulkan`. Identical CEF errors.
+  Note CrossOver does **not** patch `feature_level_10_supported()`; they make it
+  stricter, disabling `multiViewport` under MoltenVK. Their D3D11 is also capped
+  at feature level 9_3 — they succeed *despite* the same limit we have.
+- *"disable dxgi/d3d11 so Chromium finds no GPU"* — made it worse: 11
+  gpu-process crash loops.
