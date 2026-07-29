@@ -321,6 +321,42 @@ Steam does not map `-cef-in-process-gpu`, so we cannot ask for it directly.
 Their Steam adds it on its own; ours does not. The window is still black, and
 this is the only remaining difference.
 
+### ANSWER: CrossOver does NOT pass the flag -- Steam emits it itself
+
+Searched exhaustively:
+- `grep -c in-process-gpu` over the **entire CrossOver 26 source tarball**: **0**
+- Same for the whole `/Applications/CrossOver.app` bundle: **0**
+- Their bottle's Steam shortcut is a plain
+  `wine --bottle Steam --start ...Steam.lnk` with **no arguments**
+- No GPU keys in their `user.reg` / `system.reg`, and their `config.vdf`
+  matches ours exactly
+
+So Steam itself decides to add `--in-process-gpu`, based on what it detects
+about the environment. `-cef-in-process-gpu` **is** a genuine Steam launch
+option ("runs CEF GPU processing as thread of browser process"), but in our
+prefix Steam drops it -- passing it alongside `-cef-disable-gpu` yields neither.
+
+Steam has (at least) three GPU-disable paths, distinguishable in
+`logs/webhelper_gpu.txt`:
+- `Disabled/CommandLine`   -- from `-cef-disable-gpu`
+- `Disabled/RuntimeDetect` -- Steam noticed the GPU process failing and gave up
+  (observed here after passing `-cef-in-process-gpu` alone)
+
+Their flag set (`--disable-gpu --in-process-gpu`) differs from what our Steam
+produces from `-cef-disable-gpu` (`--disable-gpu --disable-gpu-compositing
+--use-gl=angle --use-angle=swiftshader-webgl`). Same client build 1785187029,
+same `-uimode=7 -launcher=0 -startcount=0`. Steam also gives them
+`--enable-features=PlatformHEVCDecoderSupport`, another *capability-detection*
+outcome -- further evidence that Steam probes the environment and our prefix
+answers differently.
+
+Known detection difference: our `gldriverquery.exe` fails to launch
+(`ChildProcessQuery: failed with code -2`, `CGpuTopology: failed to run gpu
+topology query`) because it imports `SDL2.dll`, which is absent. Their bottle
+logs **no such failure**. But `SDL2.dll` is missing from *both* prefixes and
+both Steam trees are byte-identical in `bin/`, so why theirs succeeds is still
+unexplained. **This is the most promising remaining thread.**
+
 ### Next step
 Force `--in-process-gpu` into the webhelper. Steam builds that command line, so
 the practical route is a shim: rename `steamwebhelper.exe` and drop in a small
