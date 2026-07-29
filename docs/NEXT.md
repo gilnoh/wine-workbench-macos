@@ -105,10 +105,34 @@ list below.
    CONTRAST,ORIENTATION}` and `LOGPIXELSX/Y`, `BITSPIXEL` are **identical** in
    both Wines (`tools/probes/fontsmooth.c`).
 
-   Next probe: stop looking at Wine and ask Chromium. Inject its own logging via
-   the `WINE_APPEND_ARGS` hook, e.g.
-   `--enable-logging=stderr --v=1 --vmodule=*font*=2,*skia*=2,*text*=2`,
-   and compare against the same run under CrossOver's Wine.
+   **Only Chromium's DirectWrite path is affected.** Wine's GDI text is fine:
+   `notepad` renders, and Steam's own native updater dialog renders
+   "Updating Steam...", "Verifying installation...", "Cancel" correctly --
+   `docs/evidence/steam-updater-surface-with-text.png`, captured from the same
+   surface-dump run that produced the empty login window.
+
+   Per-process attribution (`WINEDEBUG=+pid,+dwrite`) shows the **renderer**
+   does the typeface work and then stops: it registers 15 custom web fonts
+   (`CreateCustomFontFileReference` / `dwritefontsetbuilder1_AddFontFile`),
+   creates faces, reads tables, calls `GetGlyphCount`, and its final calls are a
+   run of `dwritefontface2_GetColorPaletteCount` -- exactly where CrossOver's
+   renderer continues on to `GetDesignGlyphMetrics` -> `GetMetrics` ->
+   `CreateGlyphRunAnalysis`.
+
+   Further ruled out:
+   - **web fonts** -- `--disable-remote-fonts` changes nothing, so Motiva Sans
+     is not the problem despite the 15 custom font registrations.
+   - **the one CrossOver dwrite patch** (CXHACK forcing
+     `DWRITE_RENDERING_MODE_OUTLINE` off, bug 14558/14721) is irrelevant:
+     **neither** Wine calls `GetRecommendedRenderingMode` at all.
+   - **Chromium's own logging** -- `--vmodule=dwrite_font_proxy*,dwrite_font_lookup*,
+     font_fallback*` emits nothing; those paths are not exercised.
+
+   Next probe: re-run CrossOver with `+pid` and compare **renderer to renderer**.
+   Their 1119 `CreateGlyphRunAnalysis` calls have not been attributed to a
+   process yet -- if they come from the browser rather than the renderer, then
+   rasterisation happens somewhere structurally different, which would explain
+   why our renderer simply never asks.
 
 2. **Then formalise:** fold the working
    flags into `profiles/steam.env`, fix `bin/gamerun` (see below), and delete
