@@ -42,8 +42,9 @@ env_args=(
     PATH="$BIN:$PATH"
 )
 [ -n "$ALL_OVERRIDES" ] && env_args+=( WINEDLLOVERRIDES="$ALL_OVERRIDES" )
-[ ${#BACKEND_ENV[@]} -gt 0 ] && env_args+=( "${BACKEND_ENV[@]}" )
-[ ${#PROFILE_ENV[@]:-0} -gt 0 ] && env_args+=( "${PROFILE_ENV[@]}" )
+# ${arr[@]+"${arr[@]}"} expands to nothing when empty, safely on bash 3.2.
+env_args+=( ${BACKEND_ENV[@]+"${BACKEND_ENV[@]}"} )
+env_args+=( ${PROFILE_ENV[@]+"${PROFILE_ENV[@]}"} )
 
 case "${1:-}" in
     --shell)

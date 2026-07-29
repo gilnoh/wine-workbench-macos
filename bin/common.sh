@@ -1,7 +1,9 @@
 #!/bin/bash
 # Shared helpers for the games tree. Sourced by mkprefix / gamerun / backend-install.
 
-set -euo pipefail
+# No `set -u`: macOS ships bash 3.2, where ${#arr[@]} on a declared-but-empty
+# array trips "unbound variable". The env arrays below are routinely empty.
+set -eo pipefail
 
 GAMES_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export GAMES_ROOT
@@ -46,6 +48,8 @@ load_profile() {
     EXE=""
     ARGS=""
     WORKDIR=""
+    WINEDLLOVERRIDES=""
+    PROFILE_ENV=()
     # shellcheck disable=SC1090
     source "$f"
     PREFIX_PATH="$PREFIXES_DIR/$PREFIX"
