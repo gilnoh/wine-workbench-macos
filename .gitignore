@@ -1,0 +1,13 @@
+# Build artifacts and installed trees — reproducible from source + scripts.
+/build/
+/runtimes/
+/src/
+/backends/*/
+/prefixes/
+/library/
+
+# Keep the backend layout documented even though contents are ignored.
+!/backends/README.md
+
+*.log
+.DS_Store
