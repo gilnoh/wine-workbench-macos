@@ -17,3 +17,6 @@
 
 # probe binaries (rebuild with tools/probes/build.sh)
 tools/probes/*.exe
+
+# fetched by bin/get-winetricks
+/bin/vendor/

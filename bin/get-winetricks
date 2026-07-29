@@ -1,0 +1,47 @@
+#!/bin/bash
+# Fetch the pinned winetricks into bin/vendor/, verifying its checksum.
+#
+# Vendoring 20k lines of someone else's script bloats the tree and goes stale
+# silently; fetching HEAD is not reproducible. Pinning a commit plus a sha256
+# gives us both a small repo and a build we can reproduce on a clean machine.
+#
+# To move to a newer winetricks: update PIN, run with --update to print the new
+# checksum, then paste it into SHA256.
+set -euo pipefail
+
+PIN=20260125-next
+URL="https://raw.githubusercontent.com/Winetricks/winetricks/master/src/winetricks"
+SHA256=954d17f56ae5f4d32eb083193a4a838c73ae5ff6b91765d93b0eab59cf2e7d29
+
+dir="$(cd "$(dirname "$0")" && pwd)/vendor"
+dest="$dir/winetricks"
+mkdir -p "$dir"
+
+if [ "${1:-}" != "--force" ] && [ -f "$dest" ] \
+   && [ "$(shasum -a 256 "$dest" | cut -d' ' -f1)" = "$SHA256" ]; then
+    echo "winetricks $PIN already present and verified"
+    exit 0
+fi
+
+tmp="$(mktemp)"
+trap 'rm -f "$tmp"' EXIT
+curl -fsSL --max-time 120 -o "$tmp" "$URL"
+got="$(shasum -a 256 "$tmp" | cut -d' ' -f1)"
+
+if [ "${1:-}" = "--update" ]; then
+    echo "downloaded version: $(grep -m1 -E '^WINETRICKS_VERSION=' "$tmp" | cut -d= -f2)"
+    echo "sha256:             $got"
+    echo "(update PIN and SHA256 in this script if that is what you want)"
+    exit 0
+fi
+
+if [ "$got" != "$SHA256" ]; then
+    echo "ERROR: winetricks checksum mismatch." >&2
+    echo "  expected $SHA256" >&2
+    echo "  got      $got" >&2
+    echo "Upstream moved. Review the change, then re-pin with: $0 --update" >&2
+    exit 1
+fi
+
+install -m 0755 "$tmp" "$dest"
+echo "winetricks $PIN installed to $dest"

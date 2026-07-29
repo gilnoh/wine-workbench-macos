@@ -48,8 +48,12 @@ env_args=(
 # 9_x). Our patched winemac.drv sets the bit when this is 1.
 env_args+=( WINEMAC_FWD_COMPAT_GL_CTX=1 )
 
-icd="$(runtime_vk_icd "$RUNTIME")"
-[ -f "$icd" ] && env_args+=( VK_ICD_FILENAMES="$icd" )
+# Deliberately NOT setting VK_ICD_FILENAMES. Pointing it at MoltenVK's own ICD
+# is actively harmful: that manifest carries is_portability_driver:true, so the
+# Khronos loader hides the driver from any application that does not opt into
+# VK_KHR_portability_enumeration -- Steam does not, and got
+# VK_ERROR_INCOMPATIBLE_DRIVER. Left unset, the loader's default search finds
+# MoltenVK correctly. See docs/RUNTIME.md ("MoltenVK portability flag").
 [ -n "$ALL_OVERRIDES" ] && env_args+=( WINEDLLOVERRIDES="$ALL_OVERRIDES" )
 # ${arr[@]+"${arr[@]}"} expands to nothing when empty, safely on bash 3.2.
 env_args+=( ${BACKEND_ENV[@]+"${BACKEND_ENV[@]}"} )

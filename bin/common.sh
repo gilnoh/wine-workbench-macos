@@ -40,20 +40,22 @@ runtime_dyld_path() {
     esac
 }
 
-# Vulkan ICD (driver) manifest. Wine links the Vulkan *loader*, but the loader
-# finds no driver unless pointed at one -- Homebrew installs MoltenVK's manifest
-# under etc/ rather than the standard share/vulkan/icd.d/, so autodiscovery
-# fails. Needed by DXVK, and by anything using ANGLE-on-Vulkan.
+# There is deliberately no runtime_vk_icd() helper any more, and nothing here
+# sets VK_ICD_FILENAMES.
 #
-# Note MoltenVK declares is_portability_driver:true, so the loader hides it from
-# applications that do not opt in via VK_KHR_portability_enumeration. Setting
-# this is necessary but not always sufficient.
-runtime_vk_icd() {
-    case "$1" in
-        *-x86_64) echo "/usr/local/opt/molten-vk/etc/vulkan/icd.d/MoltenVK_icd.json" ;;
-        *)        echo "/opt/homebrew/opt/molten-vk/etc/vulkan/icd.d/MoltenVK_icd.json" ;;
-    esac
-}
+# The earlier belief -- that Homebrew installs MoltenVK's manifest somewhere the
+# loader cannot autodiscover -- was wrong. The loader searches
+# /usr/local/etc/vulkan/icd.d and finds it; `vulkaninfo` with no environment set
+# enumerates the GPU correctly.
+#
+# Pointing VK_ICD_FILENAMES at MoltenVK's own manifest was actively harmful,
+# because that manifest carries is_portability_driver:true and the loader then
+# hides the driver from applications that do not request
+# VK_KHR_portability_enumeration. Steam does not, so it got
+# VK_ERROR_INCOMPATIBLE_DRIVER and concluded the machine had no GPU.
+#
+# bin/provision-host strips that flag from the installed manifest; see
+# docs/RUNTIME.md.
 
 # NOTE: do NOT wrap wine in `arch -x86_64`.
 #
