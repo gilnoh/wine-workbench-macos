@@ -1,0 +1,30 @@
+#!/bin/bash
+# Kill every Wine-side process belonging to this tree.
+#
+#   bin/killwine
+#
+# Wine shares one wineserver per WINEPREFIX, and a half-dead prefix corrupts the
+# next launch, so always run this before relaunching anything.
+#
+# Deliberately matches only Wine-hosted processes (Windows-style argv, our
+# runtime path, wineserver). A native macOS Steam.app -- which also runs a
+# process called `steamwebhelper` -- must NOT be caught by this.
+#
+# Do NOT "shut down" Steam with `wine steam.exe -shutdown`: that SPAWNS ANOTHER
+# wine process (and another Dock icon) to deliver the message. Just kill.
+
+count() { ps aux | grep -E 'C:\\|steamwebhelper\.exe|wineserver|games/runtimes/wine-1' | grep -v grep | wc -l | tr -d ' '; }
+
+echo "wine-side processes before: $(count)"
+
+pkill -9 -f 'steamwebhelper\.exe'      2>/dev/null
+pkill -9 -f 'C:\\Program Files'        2>/dev/null
+pkill -9 -f 'C:\\windows'              2>/dev/null
+pkill -9 -f 'games/runtimes/wine-1'    2>/dev/null
+pkill -9 -f 'wineserver'               2>/dev/null
+
+echo "wine-side processes after:  $(count)"
+
+remaining=$(ps aux | grep -iE "/Applications/Steam.app|Application Support/Steam" | grep -v grep | wc -l | tr -d ' ')
+[ "$remaining" -gt 0 ] && echo "note: $remaining native macOS Steam process(es) left running (not ours)"
+exit 0
