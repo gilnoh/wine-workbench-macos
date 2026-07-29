@@ -135,9 +135,43 @@ Wine 11.14, x86_64, `--enable-archs=i386,x86_64`, installed to
 - Shared library visible in-prefix as `S:\steamapps` — OK
 - Configured with: gnutls, freetype, vulkan, ffmpeg, both mingw targets
 
-## OPEN: Steam client UI renders black (2026-07-29)
+## ROOT CAUSE FOUND: Steam black window = OpenGL 2.1 (2026-07-29)
 
-**Status: unresolved.** The Steam client runs, connects, loads its UI HTML and
+**Stock Wine's `winemac.drv` exposes only OpenGL 2.1** (`GL_VERSION: 2.1 Metal - 90.5`
+on an M1 Max). macOS offers 4.1 only via a *core* profile, which upstream
+winemac.drv does not request. Everything follows from that:
+
+    GL 2.1  ->  wined3d can only claim D3D feature level 9_x
+            ->  ANGLE caps at GLES 2.0
+            ->  Chromium requires GLES 3.0
+            ->  GPU init fails, nothing composites, window is black
+
+`MaxVersionGL=0x00040001` does not help: wined3d cannot request more than the
+driver offers.
+
+**Why CrossOver works:** its Steam bottle uses *builtin wined3d* (verified --
+its d3d11.dll/dxgi.dll are "Wine builtin DLL", with no DXVK/DXMT/D3DMetal
+override and no Direct3D registry tuning), with the GPU **enabled** and a
+completely clean cef_log. CodeWeavers' patched winemac.drv simply gives
+wined3d a modern GL context. That patch is their advantage here.
+
+**Two routes to fix, both open:**
+1. `mesa_gl_to_metal` -- give Wine real OpenGL 4.6 via Mesa/zink/KosmicKrisp.
+   This is what that project was always for; Steam is a second consumer
+   besides Task Force Admiral, and a far lighter GL workload.
+2. DXMT -- bypasses GL entirely and *does* clear the feature-level hurdle
+   (the GLES 2.0 cap disappears), but then fails in `SwapChain11::reset`
+   with `HRESULT 0x80004005` -> `eglCreateWindowSurface: EGL_BAD_ALLOC`.
+   DXMT's own debug log stays empty, so this needs source-level work --
+   a genuine upstream contribution opportunity.
+
+**Also required regardless:** native `d3dcompiler_47.dll`. Wine's builtin is a
+vkd3d-shader wrapper (1.1 MB); the real Microsoft one is 4.3 MB
+("Microsoft (R) Optimizing Compiler"). ANGLE compiles its HLSL through it.
+CrossOver's bottle installs it. Install via winetricks `d3dcompiler_47`.
+
+### Earlier status (superseded)
+**Status: was unresolved.** The Steam client runs, connects, loads its UI HTML and
 executes its JavaScript — but the window is a black rectangle.
 
 ### Ruled out
