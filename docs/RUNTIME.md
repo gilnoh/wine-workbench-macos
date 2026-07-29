@@ -212,6 +212,25 @@ theories; the refuted list in `NEXT.md` exists so they are not chased twice.
   something it probes. Ruled out: bundled MoltenVK, the Apple GPTK hook, bottle
   registry, environment variables, D3DMetal DLLs (not loaded), the AMD GPU
   identity spoof, and `wined3d`'s Vulkan renderer.
+
+  **Chromium's GPU blocklist is not the mechanism either.** With
+  `--vmodule=gpu_control_list*=3` Chromium names every rule it matches:
+
+  | reported GPU identity | matched `gpu_blocklist` rules |
+  | --------------------- | ----------------------------- |
+  | Apple `0x106b` (ours) | 59, 90, 91, 122, 142, 164, 175, 182 |
+  | AMD `0x1002/0x66af` (CrossOver's identity, spoofed onto ours) | 122, 124, 139, 144, 166, 167 |
+
+  The sets differ, but **neither disables the GPU** — Chromium keeps it and
+  spawns a GPU process in both cases, and the window is black either way
+  (confirmed visually, not just from logs). So the AMD identity, which looked
+  like the strongest lead for a long time, is definitively not the cause.
+
+  That flag combination is the way to get observability here; it is worth
+  reaching for first if this is picked up again. What remains unexplained is
+  CEF's own decision logic, and the honest next step is probably reading
+  `libcef.dll` around its `in-process-gpu` string rather than more black-box
+  probing.
 - **Why does our build of CrossOver's own published source not behave like
   their shipped binaries?** Same tree, but GPU identification falls back to a
   dummy card. Their build configuration or bundled dependencies differ in a way
