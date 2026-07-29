@@ -19,7 +19,7 @@ load_profile "$PROFILE"
 
 [ -d "$PREFIX_PATH" ] || die "prefix '$PREFIX' does not exist -- run: bin/mkprefix $PREFIX"
 BIN="$(runtime_bin "$RUNTIME")"
-ARCH="$(arch_prefix "$RUNTIME")"
+
 
 # --- backend --------------------------------------------------------------
 # Each backend dir carries a backend.conf defining BACKEND_OVERRIDES and,
@@ -40,6 +40,7 @@ ALL_OVERRIDES="${BACKEND_OVERRIDES}${WINEDLLOVERRIDES:+;$WINEDLLOVERRIDES}"
 env_args=(
     WINEPREFIX="$PREFIX_PATH"
     PATH="$BIN:$PATH"
+    DYLD_FALLBACK_LIBRARY_PATH="$(runtime_dyld_path "$RUNTIME"):${DYLD_FALLBACK_LIBRARY_PATH:-/usr/lib}"
 )
 [ -n "$ALL_OVERRIDES" ] && env_args+=( WINEDLLOVERRIDES="$ALL_OVERRIDES" )
 # ${arr[@]+"${arr[@]}"} expands to nothing when empty, safely on bash 3.2.
@@ -49,10 +50,10 @@ env_args+=( ${PROFILE_ENV[@]+"${PROFILE_ENV[@]}"} )
 case "${1:-}" in
     --shell)
         info "profile=$PROFILE runtime=$RUNTIME backend=$BACKEND prefix=$PREFIX"
-        exec env "${env_args[@]}" $ARCH zsh
+        exec env "${env_args[@]}" zsh
         ;;
     --winecfg)
-        exec env "${env_args[@]}" $ARCH "$BIN/winecfg"
+        exec env "${env_args[@]}" "$BIN/winecfg"
         ;;
 esac
 
@@ -60,4 +61,4 @@ esac
 
 info "launching $PROFILE  [runtime=$RUNTIME backend=$BACKEND prefix=$PREFIX]"
 cd "${WORKDIR:-$(dirname "$EXE")}" 2>/dev/null || true
-exec env "${env_args[@]}" $ARCH "$BIN/wine" "$EXE" ${ARGS:-} "$@"
+exec env "${env_args[@]}" "$BIN/wine" "$EXE" ${ARGS:-} "$@"

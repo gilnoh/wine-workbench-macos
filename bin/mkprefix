@@ -17,7 +17,7 @@ PREFIX_PATH="$PREFIXES_DIR/$NAME"
 [ -e "$PREFIX_PATH" ] && die "prefix '$NAME' already exists at $PREFIX_PATH"
 
 BIN="$(runtime_bin "$RUNTIME")"
-ARCH="$(arch_prefix "$RUNTIME")"
+
 
 info "creating prefix '$NAME' with runtime '$RUNTIME'"
 mkdir -p "$PREFIX_PATH"
@@ -27,10 +27,11 @@ mkdir -p "$PREFIX_PATH"
 env WINEPREFIX="$PREFIX_PATH" \
     WINEDLLOVERRIDES="mscoree,mshtml=" \
     PATH="$BIN:$PATH" \
-    $ARCH "$BIN/wineboot" --init 2>&1 | grep -viE "^wine: created|fixme:" || true
+    DYLD_FALLBACK_LIBRARY_PATH="$(runtime_dyld_path "$RUNTIME"):/usr/lib" \
+    "$BIN/wineboot" --init 2>&1 | grep -viE "^wine: created|fixme:" || true
 
 info "waiting for wineserver to settle"
-env WINEPREFIX="$PREFIX_PATH" PATH="$BIN:$PATH" $ARCH "$BIN/wineserver" -w
+env WINEPREFIX="$PREFIX_PATH" PATH="$BIN:$PATH" "$BIN/wineserver" -w
 
 # Mount the shared Steam library as drive S:.
 mkdir -p "$LIBRARY_DIR/steamapps"

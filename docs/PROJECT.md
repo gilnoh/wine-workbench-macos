@@ -86,6 +86,37 @@ provides, so it may not load on stock upstream Wine. Building from source with
 a `patches/` dir makes this tractable. DXMT needs a similar `winemac.drv`
 Metal-exposure patch, so the two share a mechanism.
 
+## Gotchas
+
+**Never wrap `wine` in `arch -x86_64`.** A thin x86_64 binary is auto-translated
+by Rosetta when exec'd directly, so the wrapper buys nothing — and `/usr/bin/arch`
+is SIP-protected, so dyld strips every `DYLD_*` variable when spawning through it.
+Symptom: 18 "Wine cannot find the FreeType font library" errors per launch, and
+Vulkan silently unavailable. `arch -x86_64` is required for *building* only.
+
+**`DYLD_FALLBACK_LIBRARY_PATH` must include the matching Homebrew lib dir.** Wine
+`dlopen`s host libraries by bare soname (`libfreetype.6.dylib`, `libvulkan.1.dylib`).
+Modern macOS dropped `/usr/local/lib` from dyld's default search path. `bin/common.sh`
+sets this per runtime: `/usr/local/lib` for x86_64, `/opt/homebrew/lib` for arm64.
+
+**Always pass `WINEPREFIX`.** Without it Wine silently initialises `~/.wine`,
+which is never what this tree wants.
+
+**macOS ships bash 3.2**, where `${#arr[@]}` on a declared-but-empty array trips
+`set -u`. The scripts use `set -eo pipefail` and the `${arr[@]+"${arr[@]}"}` idiom.
+
+## Verified working (2026-07-29)
+
+Wine 11.14, x86_64, `--enable-archs=i386,x86_64`, installed to
+`runtimes/wine-11.14-x86_64`:
+
+- 64-bit PE execution — OK
+- **32-bit PE execution via new WoW64** — OK (96 builtins in `syswow64`); this is
+  the Strategic Command path
+- FreeType — 0 load errors
+- Shared library visible in-prefix as `S:\steamapps` — OK
+- Configured with: gnutls, freetype, vulkan, ffmpeg, both mingw targets
+
 ## Related work on this machine
 
 - `/Users/<user>/progs/mesa_gl_to_metal` — Mesa (zink + kosmickrisp) +

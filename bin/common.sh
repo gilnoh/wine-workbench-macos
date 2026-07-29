@@ -28,14 +28,28 @@ runtime_bin() {
     echo "$RUNTIMES_DIR/$rt/bin"
 }
 
-# x86_64 runtimes must be invoked through Rosetta from an arm64 shell.
-# Emits the arch prefix needed for a given runtime, or nothing if native.
-arch_prefix() {
+# Wine dlopen()s host libraries by bare name (libfreetype.6.dylib,
+# libvulkan.1.dylib, ...). Modern macOS dropped /usr/local/lib from dyld's
+# default search path, so without this Wine silently loses fonts and Vulkan.
+# x86_64 runtimes need the x86_64 Homebrew at /usr/local; an arm64 runtime
+# would need /opt/homebrew instead.
+runtime_dyld_path() {
     case "$1" in
-        *-x86_64) echo "arch -x86_64" ;;
-        *)        echo "" ;;
+        *-x86_64) echo "/usr/local/lib" ;;
+        *)        echo "/opt/homebrew/lib" ;;
     esac
 }
+
+# NOTE: do NOT wrap wine in `arch -x86_64`.
+#
+# It is unnecessary -- a thin x86_64 binary is auto-translated by Rosetta when
+# exec'd directly from an arm64 process -- and it is actively harmful: /usr/bin/arch
+# is SIP-protected, so dyld strips every DYLD_* variable when spawning through it.
+# That silently breaks the runtime_dyld_path above, costing fonts and Vulkan.
+#
+# Verified 2026-07-29: with the arch wrapper, wine emits 18 FreeType load errors
+# per launch; without it, zero. `arch -x86_64` is still required for *building*
+# (see bin/env-build-x86_64.sh), just never for running.
 
 load_profile() {
     local name="$1"
