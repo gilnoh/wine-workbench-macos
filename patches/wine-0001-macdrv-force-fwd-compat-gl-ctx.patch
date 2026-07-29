@@ -1,0 +1,33 @@
+diff --git a/dlls/winemac.drv/opengl.c b/dlls/winemac.drv/opengl.c
+index 6b2ec0bc..061331cf 100644
+--- a/dlls/winemac.drv/opengl.c
++++ b/dlls/winemac.drv/opengl.c
+@@ -2134,6 +2134,28 @@ static BOOL macdrv_context_create(int format, void *share, const int *attrib_lis
+     if ((major == 3 && (minor == 2 || minor == 3)) ||
+         (major == 4 && (minor == 0 || minor == 1)))
+     {
++        /* macOS grants OpenGL 3.2+ only through a forward-compatible core
++         * profile. Callers that ask for 3.2+ without the forward-compatible bit
++         * are rejected below -- and wined3d is one of them, so it silently falls
++         * back to a legacy 2.1 context. That caps D3D feature level at 9_x,
++         * which caps ANGLE at GLES 2.0, which is why Chromium-based apps (the
++         * Steam client) render a black window.
++         *
++         * Setting the bit on the caller's behalf can only improve matters: the
++         * alternative is outright failure. Gated by an env var so the stock
++         * behaviour stays reachable for A/B testing.
++         *
++         * Ported from CrossOver 26 (CodeWeavers "CW Hack 24834", LGPL). */
++        const char *force_fwd_compat = getenv("WINEMAC_FWD_COMPAT_GL_CTX");
++        if (force_fwd_compat && force_fwd_compat[0] == '1')
++        {
++            if (!(flags & WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB))
++            {
++                TRACE("forcing forward-compatible bit for %u.%u context\n", major, minor);
++                flags |= WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB;
++            }
++        }
++
+         if (!(flags & WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB))
+         {
+             WARN("OS X only supports forward-compatible 3.2+ contexts\n");

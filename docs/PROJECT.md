@@ -189,50 +189,72 @@ vkd3d-shader wrapper (1.1 MB); the real Microsoft one is 4.3 MB
 CrossOver bottle installs it. Now copied into our prefix; formalise via
 winetricks `d3dcompiler_47`.
 
-### Next candidates
-1. **CrossOver sources.** CodeWeavers publishes them (LGPL). Diff their
-   `dlls/winemac.drv` against upstream, port the delta as a patch. Legal,
-   maintainable, and exactly the kind of change worth upstreaming.
-2. **Fix `GL_INVALID_FRAMEBUFFER_OPERATION` directly** in wined3d's macOS path.
-3. **DXMT's DXGI swapchain gap** -- it already clears the feature-level hurdle;
-   only `SwapChain11` creation fails. Its debug log stays empty, so this needs
-   source-level work.
+### BREAKTHROUGH: CrossOver uses wined3d's **Vulkan** renderer (CW HACK 18311)
 
-### Earlier status (superseded)
-**Status: was unresolved.** The Steam client runs, connects, loads its UI HTML and
-executes its JavaScript — but the window is a black rectangle.
+Diffing CrossOver 26's sources (LGPL, `media.codeweavers.com/pub/crossover/source/`)
+against upstream Wine 11.0 found the mechanism, in `dlls/wined3d/directx.c`:
 
-### Ruled out
-- **Wine build.** `notepad` renders perfectly (menus, scrollbar, status bar).
-  `winemac.so`, `opengl32.so`, `winevulkan.so`, `winecoreaudio.so` all present.
-  64-bit and 32-bit PE both execute.
-- **Network.** `connection_log.txt` shows `ConnectionCompleted()` and
-  "UDP - yes, TCP - yes, WebSocket - yes".
-- **Page load.** JS errors are reported from `steamloopback.host/library.js`,
-  so the UI document loads and runs.
+```c
+-    return wined3d_adapter_gl_create(ordinal, wined3d_creation_flags);
++    if (wined3d_settings.renderer == WINED3D_RENDERER_OPENGL)
++        return wined3d_adapter_gl_create(...);
++    /* CW HACK 18311: Use the Vulkan renderer on macOS. */
++    if ((adapter = wined3d_adapter_vk_create(...)))
++        ERR_(winediag)("Using the Vulkan renderer for d3d10/11 applications.\n");
+```
 
-### Failure chain, and how far each fix got
-| Config | ANGLE result |
-|---|---|
-| builtin `vulkan-1`, MoltenVK ICD | Vulkan `error -9` (`VK_ERROR_INCOMPATIBLE_DRIVER`); SwANGLE also fails; **GPU process exits** |
-| `vulkan-1=n` (CEF's own loader) | switches to **D3D11**; `GLES 3.0 > max supported (2,0)` — wined3d feature level too low |
-| KosmicKrisp ICD | identical to above; ANGLE prefers D3D11 once reachable, so the Vulkan driver is never consulted |
-| **DXMT installed** | GLES cap **gone**; fails later at `SwapChain11::reset` `HRESULT 0x80004005` → `eglCreateWindowSurface: EGL_BAD_ALLOC` |
-| DXMT + `-cef-disable-gpu-compositing` | **zero ANGLE/EGL/SwapChain errors** — and still black |
+They run wined3d over **Vulkan**, not OpenGL, for d3d10/11. **Upstream already
+supports this with no patch at all:**
 
-The last row is the important one: CEF reports no rendering errors at all, yet
-no pixels reach the window. That points at the CEF→Wine *presentation* path
-rather than ANGLE initialisation.
+    [HKEY_CURRENT_USER\Software\Wine\Direct3D]
+    "renderer"="vulkan"
 
-Also tried: `-cef-disable-gpu` (black), Wine virtual desktop via
-`explorer /desktop=` (Steam does not finish starting at all).
+Diff sizes vs upstream 11.0: `dxgi` **0 files changed**; `wined3d` 366
+insertions/13 files; `winemac.drv` 1175 insertions/23 files (mostly
+game-specific hacks, D3DMetal glue, keyboard/window work).
 
-### Next candidates
-- Steam's legacy `cef.win7x64` build (a different, older rendering path) —
-  reachable by reporting Windows 7, though Steam dropped Win7 support.
-- An older Steam client package.
-- Bypass installation entirely with `steamcmd` (see below) and validate DXMT
-  against a real game, decoupling progress from this bug.
+Their `adapter_vk.c` additionally expects `VK_DRIVER_ID_MOLTENVK` and disables
+`multiple_viewports` on MoltenVK ("causes glitches in multiple games").
+
+### Current state of the Vulkan attempt
+
+`renderer=vulkan` is confirmed active (`winediag: Using the Vulkan renderer.`)
+and Vulkan works inside Wine -- KosmicKrisp enumerates a physical device
+(`VK_EXT_external_memory_metal` present). **But ANGLE still reports
+`GLES 3.0 > max supported (2,0)`.**
+
+- **KosmicKrisp**: Vulkan device enumerates; only the GLES cap remains.
+- **MoltenVK** (CrossOver's choice): *worse* -- 34 errors, back to
+  `SwANGLE failed / EGL_NOT_INITIALIZED`. The loader's portability filter
+  hides it, as it did for ANGLE earlier.
+
+**Leading hypothesis:** wined3d-on-Vulkan reports D3D feature level < 10_0
+because Metal has no geometry shaders (FL 10_0 requires them), so ANGLE caps at
+GLES 2.0. Next step is to confirm the feature level wined3d advertises and
+compare with what CrossOver's patched wined3d does.
+
+### Two GL theories raised and REFUTED (recorded so they are not re-chased)
+
+1. *"winemac.drv never requests core profile."* False. A trace shows wined3d
+   creating a probe context at 2.1 and then a real context at **4.1**:
+   `trace:opengl:make_context_current context ... version 4.1`.
+   The GL 2.1 reading came from `test_wine_gl.exe`, which creates a *legacy*
+   context -- 2.1 by definition on macOS, and no evidence about wined3d.
+2. *"Forward-compatible bit is missing."* CrossOver does carry such a hack
+   (CW Hack 24834, `CX_FWD_COMPAT_GL_CTX`), ported here as
+   `patches/wine-0001-macdrv-force-fwd-compat-gl-ctx.patch` and gated behind
+   `WINEMAC_FWD_COMPAT_GL_CTX=1`. **It never fires** -- wined3d already gets
+   4.1 -- so it is inert. Kept only for completeness; not the fix.
+
+### Also required regardless
+Native `d3dcompiler_47.dll`. Wine's builtin is a vkd3d-shader wrapper (1.1 MB);
+the real Microsoft one is 4.3 MB ("Microsoft (R) Optimizing Compiler"). ANGLE
+compiles HLSL through it and the CrossOver bottle installs it. Copied into our
+prefix; formalise via winetricks `d3dcompiler_47`.
+
+### Reference diffs kept
+- `patches/crossover26-wined3d.diff`
+- `patches/crossover26-winemac.drv.diff`
 
 ## Related work on this machine
 

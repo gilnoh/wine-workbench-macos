@@ -42,6 +42,12 @@ env_args=(
     PATH="$BIN:$PATH"
     DYLD_FALLBACK_LIBRARY_PATH="$(runtime_dyld_path "$RUNTIME"):${DYLD_FALLBACK_LIBRARY_PATH:-/usr/lib}"
 )
+# macOS grants OpenGL 3.2+ only via a forward-compatible core profile, and
+# upstream winemac.drv rejects 3.2+ requests that lack that bit -- which wined3d
+# does not set, so it silently drops to a legacy 2.1 context (D3D feature level
+# 9_x). Our patched winemac.drv sets the bit when this is 1.
+env_args+=( WINEMAC_FWD_COMPAT_GL_CTX=1 )
+
 icd="$(runtime_vk_icd "$RUNTIME")"
 [ -f "$icd" ] && env_args+=( VK_ICD_FILENAMES="$icd" )
 [ -n "$ALL_OVERRIDES" ] && env_args+=( WINEDLLOVERRIDES="$ALL_OVERRIDES" )
