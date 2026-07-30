@@ -1,0 +1,61 @@
+diff --git a/dlls/crypt32/unixlib.c b/dlls/crypt32/unixlib.c
+index 8a3755f4..6fcb805f 100644
+--- a/dlls/crypt32/unixlib.c
++++ b/dlls/crypt32/unixlib.c
+@@ -108,7 +108,26 @@ static NTSTATUS process_attach( void *args )
+         setenv("GNUTLS_SYSTEM_PRIORITY_FILE", "/dev/null", 0);
+     }
+ 
+-    if (!(libgnutls_handle = dlopen( SONAME_LIBGNUTLS, RTLD_NOW )))
++    libgnutls_handle = dlopen( SONAME_LIBGNUTLS, RTLD_NOW );
++#ifdef __APPLE__
++    /* A bare soname resolves only through DYLD_FALLBACK_LIBRARY_PATH, whose
++     * default list does not cover Homebrew, so any process Wine spawns without
++     * that variable inherited loses TLS entirely. Same bug as win32u/vulkan.c,
++     * win32u/freetype.c and dwrite/freetype.c. */
++    if (!libgnutls_handle)
++    {
++        static const char *const fallbacks[] =
++        {
++            "/usr/local/lib/" SONAME_LIBGNUTLS,     /* x86_64 Homebrew */
++            "/opt/homebrew/lib/" SONAME_LIBGNUTLS,  /* arm64 Homebrew  */
++        };
++        unsigned int i;
++
++        for (i = 0; i < ARRAY_SIZE(fallbacks) && !libgnutls_handle; i++)
++            libgnutls_handle = dlopen( fallbacks[i], RTLD_NOW );
++    }
++#endif
++    if (!libgnutls_handle)
+     {
+         ERR_(winediag)( "failed to load libgnutls, no support for pfx import/export\n" );
+         return STATUS_DLL_NOT_FOUND;
+diff --git a/dlls/secur32/schannel_gnutls.c b/dlls/secur32/schannel_gnutls.c
+index b95d8875..2d356a5e 100644
+--- a/dlls/secur32/schannel_gnutls.c
++++ b/dlls/secur32/schannel_gnutls.c
+@@ -1472,6 +1472,24 @@ static NTSTATUS process_attach( void *args )
+     }
+ 
+     libgnutls_handle = dlopen(SONAME_LIBGNUTLS, RTLD_NOW);
++#ifdef __APPLE__
++    /* A bare soname resolves only through DYLD_FALLBACK_LIBRARY_PATH, whose
++     * default list does not cover Homebrew, so any process Wine spawns without
++     * that variable inherited loses TLS entirely. Same bug as win32u/vulkan.c,
++     * win32u/freetype.c and dwrite/freetype.c. */
++    if (!libgnutls_handle)
++    {
++        static const char *const fallbacks[] =
++        {
++            "/usr/local/lib/" SONAME_LIBGNUTLS,     /* x86_64 Homebrew */
++            "/opt/homebrew/lib/" SONAME_LIBGNUTLS,  /* arm64 Homebrew  */
++        };
++        unsigned int i;
++
++        for (i = 0; i < ARRAY_SIZE(fallbacks) && !libgnutls_handle; i++)
++            libgnutls_handle = dlopen( fallbacks[i], RTLD_NOW );
++    }
++#endif
+     if (!libgnutls_handle)
+     {
+         ERR_(winediag)("Failed to load libgnutls, secure connections will not be available.\n");

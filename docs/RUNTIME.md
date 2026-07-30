@@ -45,9 +45,36 @@ wine tools/probes/glyphprobe.exe
 #          CreateAlphaTexture(1x1)    hr=0 non-zero bytes = 65 / 144
 ```
 
-**All three are upstreamable and none is specific to Steam, games, or macOS
-gaming.** Any Wine-on-macOS user with Homebrew dependencies hits them. Sending
-them upstream is tracked in `NEXT.md`.
+**These are workarounds for a platform mismatch, not upstream bug fixes.**
+An earlier version of this file called them "genuinely upstreamable". That was
+wrong, and worth stating plainly.
+
+Wine `dlopen`s by soname *by design* -- `WINE_CHECK_SONAME` in `aclocal.m4`
+records only the soname, never a path -- and delegates resolution to the dynamic
+loader. That is correct on Linux, which has `/etc/ld.so.conf.d/` to extend the
+search path. **macOS has no equivalent**, and dyld's default fallback is
+`/usr/lib` plus the shared cache only:
+
+```
+$ env -u DYLD_FALLBACK_LIBRARY_PATH ./dltest
+libgnutls.30.dylib   dlopen(...): tried: '/usr/lib/libgnutls.30.dylib'
+                     (no such file, not in dyld cache)
+/usr/local/lib/libgnutls.30.dylib   OK
+```
+
+(Note `/usr/local/lib` is *not* searched, despite older documentation listing
+`$HOME/lib:/usr/local/lib:/lib:/usr/lib` as the default.)
+
+So there are three legitimate answers, and upstream would likely reject the
+first: hardcode paths (what we do), set `DYLD_FALLBACK_LIBRARY_PATH` for every
+process, or **bundle the libraries** -- which is what CrossOver does, and why
+their `dlls/dwrite/freetype.c` is unmodified upstream while ours needed a patch.
+
+Our patches are pragmatic and they work. But if these ever go upstream they
+should go as a build/packaging change, not as per-site path lists. Sites found
+so far: `win32u/vulkan.c`, `win32u/freetype.c`, `dwrite/freetype.c`,
+`crypt32/unixlib.c`, `secur32/schannel_gnutls.c` -- and the fact that the list
+keeps growing is itself the argument that patching sites is the wrong shape.
 
 Not a regression: pristine upstream Wine 11.0 fails identically. CrossOver
 escapes it only by bundling FreeType so their bare soname resolves — their
