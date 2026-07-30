@@ -1,13 +1,95 @@
 # Continue here
 
+## ⚠️ THE PIVOT — read this before anything else (decided 2026-07-30)
+
+**We are changing the base from upstream Wine to CrossOver's Wine.** Do not start
+new work against `src/wine` (upstream 11.14).
+
+### Why
+
+Every single problem solved in this repository's first two days had *already been
+solved by CodeWeavers*:
+
+| problem | already fixed in CrossOver as |
+| ------- | ----------------------------- |
+| WoW64 32→64 mode switch — a total blocker for **all** 32-bit games | `CW HACK 20760` |
+| 2D/GDI menu latency (5–10 s per mouse hover) | `CW Hack 20969, 23427` |
+| Steam black window / the whole `--in-process-gpu` saga | `CX HACK 23950` |
+| Synchronisation overhead | msync (unmarked) |
+| 2 s → 20 s menu fade (still open) | almost certainly one of theirs |
+
+That is 100% re-derivation. It helps nobody, and it is not what this project is
+for. The goal is a **niche macOS-specific library** (in the spirit of
+`mesa_gl_to_metal`), not Wine upstream contributions — so "stay on latest upstream
+so we can upstream things" was optimising for a virtue we do not need. **Latest
+Wine is not the macOS standard; CrossOver's Wine is**, because it is the only tree
+actually load-tested on this platform.
+
+### Where to get the base
+
+Researched 2026-07-30. **No maintained git repo tracks current CrossOver.**
+
+| source | state |
+| ------ | ----- |
+| **CodeWeavers tarballs** — `https://media.codeweavers.com/pub/crossover/source/crossover-sources-<ver>.tar.gz` | ✅ **26.0.0, 26.1.0, 26.2.0, 26.3.0** all live (142 MB each), plus 25.1.0. Verified by HTTP HEAD. |
+| `PhoenicisOrg/winecx` | active mirror, one git tag per release, but stops at `winecx-25.1.0` (last push Sep 2025). Useful only for diffing *across* CX releases. |
+| `Gcenx/winecx` | **404, deleted.** Most search results still point here. |
+| `tbodt/crossover-wine` | full history (102k commits), 5 stars, no version signal — abandoned. |
+| MacPorts `wine-crossover` | Wine 4.0 / CrossOver 18. Dead end. |
+| `benstonezhang/winecx_build` | *"build Wine on macOS with WoW64 from CrossOver source"* — `build.sh`, `brew_install.sh`. Pushed May 2025. **Worth reading before writing our own build.** |
+
+Ecosystem context: Sikarugir (ex-Kegworks, ex-Wineskin) is the maintained macOS
+wrapper and **Gcenx maintains its Wine engines** — but the supported engine is
+`WineCX23.7.1`. Even the curated community builds lag CrossOver badly. Nobody
+tracks 26.x, which is part of why doing it ourselves is worth something.
+
+**So: download `crossover-sources-26.3.0.tar.gz`, commit that tree, treat it as
+the base.** Keep `patches/series` for *our* deltas on top — which should then be
+only genuinely new work.
+
+### First test after the rebase — validates the whole pivot in one step
+
+**Does Steam render on the CrossOver-based runtime with `WINE_APPEND_ARGS` unset?**
+If `CX HACK 23950` does its job, delete `patches/wine-0004-…` and the entire
+injection mechanism. See `RUNTIME.md` §2.
+
+### What carries over, and what does not
+
+- **Carries over:** all of `bin/` (`build-runtime`, `bundle-libs`, `mkprefix`,
+  `gamerun`, `killwine`, `get-addons`, `compare-bottle`), `profiles/`,
+  `tools/probes/`, the bundled-libs/soname-seeding approach (`RUNTIME.md` §1), and
+  the documented negative results below.
+- **Becomes redundant:** `wine-0004` (23950 replaces it), `wine-0006` (= 20760),
+  `wine-0007` (= 20969/23427), `wine-0008` (= 24834). All four are CrossOver ports
+  or workarounds for things CrossOver fixes. Keep them until the rebase lands so
+  the game keeps working; delete them after.
+- **Watch out:** `runtimes/wine-cx26.3-x86_64` **is misnamed** — it is CX-built
+  (contains the `lretq` thunk) but we only ever had 26.0.0 source, so "26.3" is
+  unverified. And it has **zero bundled libs**, so `RUNTIME.md` §1's work must be
+  re-applied to any CX-based runtime or you silently lose freetype/vulkan/gnutls.
+  `src/cx26/` is a 9.1 MB partial extraction (only `dlls/`) — junk, delete it.
+
+---
+
 ## Start here (handover)
 
 Read this file, then `RUNTIME.md`. `PROJECT.md` is history — useful, but it
 contains conclusions that were later disproved and are marked as such.
 
+Everything below this line describes the **current, upstream-based** tree. It is
+still accurate and the game runs, but see the pivot above before extending it.
+
 **The environment works.** Steam runs, renders and logs in with no environment
-variables. The runtime is reproducible: `bin/build-runtime` builds it from a
-clean checkout and verifies it. Don't re-derive any of that.
+variables. Don't re-derive any of that.
+
+**Reproducibility, precisely** (this claim used to be overstated): every
+modification in `src/wine` now has a patch file in `patches/series`, so
+`bin/build-runtime` from a clean checkout reproduces the runtime — with one known
+difference. `wine-0005` is class `debug`, so a clean build **omits** it, whereas the
+currently-installed runtime **has** it applied (it was applied directly in
+`src/wine`, which made the class-`debug` skip meaningless). A clean rebuild is
+therefore correct-but-not-byte-identical. Resolve by reverting `wine-0005` in
+`src/wine`, or reclassifying it.
 
 **The task is Strategic Command WWII. It is NOT a graphics problem — root cause
 found 2026-07-30.** The game never gets anywhere near drawing. It dies in
@@ -226,9 +308,29 @@ took hours to provision. Use a throwaway `bin/mkprefix` prefix.
 
 ## Next actions, in order
 
-1. **Re-apply the wow64cpu fix** (see "The fix, concretely"). It is known-good — a
-   port was built and verified to reach the game's main menu — but it is currently
-   reverted. This is bookkeeping, not investigation.
+**0. THE PIVOT (see top of file).** Rebase onto CrossOver 26.3.0 source. Everything
+below is either superseded by it or unaffected.
+
+1. ~~Re-apply the wow64cpu fix~~ — **done.** `patches/wine-0006` is applied, built
+   and installed; the game reaches its menu and plays a turn of the 1939 campaign.
+
+1b. **Menu latency — solved.** `patches/wine-0007` (CrossOver's
+   `CW Hack 20969, 23427`) sends `WM_NCPAINT` asynchronously instead of
+   synchronously. Menus went from 5–10 s per hover to real-time.
+
+   Attribution is precise, not "we changed two things and it improved": the paired
+   `WM_ERASEBKGND` 1-second bound (`CW Hack 23394`) is carried in the same patch and
+   its `ERR("timeout")` fired **zero** times across a full launch and menu session,
+   so that half never engaged. The `WM_NCPAINT` change is the whole fix.
+
+   Method note worth keeping: every metric looked *normal* while this bug was
+   active — CPU, page faults and mach syscalls were all within noise of CrossOver's.
+   Only BSD syscalls differed (15,300/s vs 7,100/s), and even that was a red
+   herring. The thread was not working, it was **waiting**. Measuring throughput
+   for a latency bug wasted most of the investigation.
+
+1c. **Still open: the 2 s → 20 s menu fade.** Same family as 1b, almost certainly
+   another CrossOver paint/timer hack. Good first target once rebased.
 
 2. **Then the other two games** — Quasimorph and Battleship Command, both Unity
    D3D11, so DXMT is the intended backend. Note they are **64-bit**, so they do
@@ -270,8 +372,18 @@ rule that used to be repeated here is superseded by the two paragraphs above.)
 
 ## Open questions
 
-- **Why does CEF add `--in-process-gpu` under CrossOver and not for us?** We
-  force it via `WINE_APPEND_ARGS`; the trigger is still unknown. Ruled out:
+- ~~**Why does CEF add `--in-process-gpu` under CrossOver and not for us?**~~
+  **This was the wrong question — closed 2026-07-30.** CEF's decision logic never
+  mattered. CrossOver does not need the switch because `CX HACK 23950` gives
+  foreign-parent windows a shared-memory surface flushed to the owning process, so
+  Chromium's viz-process blits land somewhere real. The earlier session reported
+  "nothing in their source forces this flag" — technically true and completely
+  misleading, because it searched for *who passes the flag* instead of *what makes
+  the flag unnecessary*. See `RUNTIME.md` §2. Remaining work is to port it, not to
+  investigate it.
+
+  Original text, for the record: *We force it via `WINE_APPEND_ARGS`; the trigger
+  is still unknown. Ruled out:*
   bundled MoltenVK, the Apple GPTK hook, bottle registry, environment
   variables, D3DMetal DLLs, the AMD GPU identity spoof, wined3d's Vulkan
   renderer, and Chromium's GPU blocklist. See `RUNTIME.md` §7 for the

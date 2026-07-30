@@ -15,6 +15,25 @@ debug         wine-0005-winemac-surface-flush-trace.patch
 # 20760; gated on the VirtualApple brand string, so inert on real x86_64.
 # Without this, NO 32-bit game can be relied on. See docs/NEXT.md.
 workaround    wine-0006-wow64cpu-rosetta2-mode-switch.patch
+# Synchronous WM_NCPAINT blocked the painting thread, making 2D/GDI menus take
+# 5-10 s per hover. Ported from CrossOver's CW Hack 20969/23427. The paired
+# WM_ERASEBKGND bound (23394) is carried too, but measured ZERO hits -- it is a
+# diagnostic, not the fix. See docs/NEXT.md.
+workaround    wine-0007-win32u-async-ncpaint.patch
+# CW Hack 24834 port, extracted from src/wine where an earlier session had applied
+# it with no patch file at all -- so build-runtime silently dropped it. Inert
+# unless WINEMAC_FWD_COMPAT_GL_CTX=1.
+workaround    wine-0008-winemac-forward-compat-gl-context.patch
+
+# NOTE (2026-07-30): 0006, 0007 and 0008 are all ports of CrossOver hacks, and
+# 0004 is a workaround for something CrossOver fixes properly (CX HACK 23950).
+# All four become redundant once the tree is rebased onto CrossOver's Wine --
+# see docs/NEXT.md, "The pivot". They are kept until that rebase lands so the
+# game keeps working in the meantime.
+#
+# 0005 is class `debug`, so build-runtime skips it -- but it is ALREADY APPLIED in
+# src/wine, which makes the skip meaningless and ships trace code in the surface
+# flush path. Revert it in src/wine, or reclassify it. Not yet decided.
 
 # DXMT (built separately, see backends/)
 fix           dxmt-0001-include-iomanip.patch

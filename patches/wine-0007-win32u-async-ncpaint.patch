@@ -1,0 +1,71 @@
+Port of CrossOver's CW Hack 20969/23427 (+23394) to Wine 11.14: do not block the
+painting thread on WM_NCPAINT, and bound WM_ERASEBKGND.
+
+Strategic Command WWII (SDL 1.2, windib/GDI path) had pathologically laggy 2D
+menus on macOS: a mouse-hover highlight took 5-10 seconds and menu transitions
+tens of seconds, while the in-game map view was responsive. The same game under
+CrossOver 26 is instant.
+
+Measured before the fix: idle CPU ~25-30% and page faults ~0 in BOTH ours and
+CrossOver, mach syscalls ~1,550/s vs ~1,450/s -- i.e. nearly identical. The only
+delta was BSD syscalls, ~15,300/s vs ~7,100/s. So this was event/paint *latency*,
+not throughput, drawing volume, or asset loading.
+
+Ruled out along the way, each measured rather than argued:
+  - the graphics path: no ddraw/opengl32/wined3d/d3d9/dxgi is ever loaded
+  - asset loading: the rate is flat and interaction-independent
+  - SDL's 1 ms multimedia timer: dlls/winmm/time.c is byte-identical to
+    CrossOver's, and the mach-syscall rate (the timer tick) matches theirs
+  - msync: CrossOver's bottle sets WINEMSYNC=1, but running their bottle with
+    WINEMSYNC=0 left menus instant. NOTE: that control was not fully verified
+    (the process environment was not confirmed), so msync is "not demonstrated"
+    rather than "excluded".
+  - CX HACK 23950 (shm surfaces): only fires for windows whose parent is in
+    another process. Our game is single-process. See docs/NEXT.md -- it is,
+    however, the fix for the separate Steam/--in-process-gpu problem.
+
+The load-bearing change is the WM_NCPAINT one. send_message() blocks the caller
+until the target replies; send_notify_message() does not. This is confirmed by
+the ERR() kept in the WM_ERASEBKGND hunk: across a full launch and menu session
+it fired ZERO times, so the 1s bound there never engaged and cannot be what
+fixed anything. The ERASEBKGND hunk is carried anyway to match CrossOver and
+because that ERR is the only diagnostic for this class of stall.
+
+Verified: with this applied, menu highlighting and transitions are real-time.
+
+Source: src/crossover/sources/wine/dlls/win32u/dce.c (CrossOver 26.0.0, LGPL).
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+diff --git a/dlls/win32u/dce.c b/dlls/win32u/dce.c
+index 5e8d82ae..f60cb9bb 100644
+--- a/dlls/win32u/dce.c
++++ b/dlls/win32u/dce.c
+@@ -1593,7 +1593,10 @@ static HRGN send_ncpaint( HWND hwnd, HWND *child, UINT *flags )
+                 if (style & WS_VSCROLL)
+                     set_standard_scroll_painted( hwnd, SB_VERT, FALSE );
+ 
+-                send_message( hwnd, WM_NCPAINT, (WPARAM)whole_rgn, 0 );
++                /* CW Hack 20969, 23427: send WM_NCPAINT asynchronously. A
++                 * synchronous send blocks the painting thread until the target
++                 * replies, which on macOS can stall for seconds. */
++                send_notify_message( hwnd, WM_NCPAINT, (WPARAM)whole_rgn, 0, FALSE );
+             }
+             if (whole_rgn > (HRGN)1) NtGdiDeleteObjectApp( whole_rgn );
+         }
+@@ -1630,7 +1633,15 @@ static BOOL send_erase( HWND hwnd, UINT flags, HRGN client_rgn,
+             {
+                 /* don't erase if the clip box is empty */
+                 if (type != NULLREGION)
+-                    need_erase = !send_message( hwnd, WM_ERASEBKGND, (WPARAM)hdc, 0 );
++                {
++                    /* CW Hack 23394, 23427: bound WM_ERASEBKGND at 1s. An
++                     * unbounded synchronous send can stall for many seconds.
++                     * The ERR below is deliberately kept: it is the only signal
++                     * that this path is actually being hit. */
++                    need_erase = !send_message_timeout( hwnd, WM_ERASEBKGND, (WPARAM)hdc, 0,
++                                                       SMTO_ABORTIFHUNG, 1000, FALSE );
++                    if (need_erase && RtlGetLastWin32Error() == ERROR_TIMEOUT) ERR( "timeout.\n" );
++                }
+             }
+             if (!hdc_ret) release_dc( hwnd, hdc, TRUE );
+         }

@@ -109,7 +109,27 @@ WINE_APPEND_ARGS="steamwebhelper.exe=--no-sandbox --in-process-gpu --disable-gpu
 ```
 
 **This is a workaround, not a fix.** The real fix is cross-process window
-drawing in Wine, which is a substantial upstream change.
+drawing in Wine.
+
+**Update 2026-07-30: CrossOver has already implemented that fix, and it is
+`CX HACK 23950`.** When a window's parent lives in another process, they hand it a
+shared-memory-backed surface instead of Wine's throwaway `dummy_surface`, and
+flush it by sending `WM_WINE_FLUSHSHMSURFACE` to the owning process, which maps
+the section and blits it. In their own words:
+
+```c
+/* CX HACK 23950: provide a default shm surface for windows with parents in other process */
+```
+
+Scope: `win32u/dce.c`, `win32u/window.c`, `win32u/message.c`, `win32u_private.h`,
+`include/ntuser.h`, `server/window.c`. Note this section previously called the fix
+"a substantial upstream change" — it is substantial, but it exists and is on disk
+at `src/crossover/sources/wine/`.
+
+**So `wine-0004` and the whole `WINE_APPEND_ARGS` mechanism should become
+deletable.** The first test after the rebase (see `docs/NEXT.md`, "The pivot") is
+simply: does Steam render on a CrossOver-based runtime with `WINE_APPEND_ARGS`
+unset? Untested so far.
 
 A better renderer would **not** help, and this is settled rather than assumed:
 `winemac.drv/opengl.c` carries the same per-process gate and states it outright —
@@ -155,9 +175,11 @@ Run `bin/provision-host` on a clean machine. It is idempotent and has a
 
 ## 4. Building the runtime
 
-**Not yet scripted** — `bin/build-runtime` does not exist. Until it does, the
-recipe below is the source of truth, and these traps each cost real time when
-they were rediscovered:
+**`bin/build-runtime` does this** — it configures, applies `patches/series`
+(skipping class `debug` unless `--with-debug`), builds and installs, and fails the
+build if any soname comes out bare. The recipe below is kept because it documents
+*why* each flag is there, and these traps each cost real time when they were
+rediscovered:
 
 - **`gcc -m64` means *arm64* on Apple Silicon.** Build tools compiled this way
   silently mix architectures and the link fails with "found architecture arm64,
@@ -195,9 +217,13 @@ with arm64 objects.
 
 ## 5. Prefixes
 
-`bin/mkprefix <name>` creates one. The winetricks provisioning below is
-currently **manual** — folding it into `mkprefix` is still owed. Fetch a pinned,
-checksum-verified winetricks with `bin/get-winetricks`, then:
+`bin/mkprefix <name>` creates one, mounts `S:`, and provisions corefonts +
+`d3dcompiler_47` via a pinned winetricks (plus Wine Mono when the runtime has it).
+`--no-provision` skips the winetricks step. **It has never been run end to end** —
+`steam-base` predates it and was provisioned by hand — so expect to debug it the
+first time. Note it does **not** install Steam; that is still manual.
+
+The manual equivalent, for reference (fetch winetricks with `bin/get-winetricks`):
 
 ```sh
 export WINEPREFIX=$PWD/prefixes/<name>
