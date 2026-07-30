@@ -1,5 +1,43 @@
 # Continue here
 
+## Start here (handover)
+
+Read this file, then `RUNTIME.md`. `PROJECT.md` is history — useful, but it
+contains conclusions that were later disproved and are marked as such.
+
+**The environment works.** Steam runs, renders and logs in with no environment
+variables. The runtime is reproducible: `bin/build-runtime` builds it from a
+clean checkout and verifies it. Don't re-derive any of that.
+
+**The task is Strategic Command WWII: make it draw.** It launches, spins at
+~100% CPU and shows a black fullscreen window. CrossOver runs the same game from
+the same files in ~30 s, so it is not a hardware or fundamental-compatibility
+question.
+
+**Read this before touching graphics backends:** it is an **SDL 1.2 /
+DirectDraw** title, *not* D3D9. `WINEDEBUG=+file` shows the last modules it
+touches are `ddraw.dll` and `opengl32.dll`. Both `wined3d` and DXVK were tried
+and failed *identically*, because neither is in the path. The profile currently
+sets `BACKEND="dxvk-3.0.2"`, which is therefore almost certainly irrelevant —
+consider setting it back to `"none"` as a cleaner baseline.
+
+**First thing to do:** re-run the trace on the current runtime. The earlier
+trace was taken while gnutls was failing to load 25 times per launch, and those
+failures were not necessarily innocent. That is fixed now, and nobody has
+re-measured since.
+
+```sh
+bin/killwine
+bin/gamerun steam          # Steam must be up first; see "launch recipes" below
+# then, in another shell, with WINEDEBUG=+file / +wgl,+opengl,+ddraw
+```
+
+Ask Gil to look at the screen when the game is fullscreen — it takes its own
+macOS Space and `screencapture` will photograph the wrong one. He can send a
+⌘⇧3 screenshot from Desktop.
+
+---
+
 `PROJECT.md` holds design and decisions. `RUNTIME.md` holds what this
 environment changes from stock Wine and why. This file is only "what to do
 next".
