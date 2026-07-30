@@ -1,0 +1,126 @@
+#!/bin/bash
+# Bundle the host libraries Wine dlopens into the runtime tree.
+#
+#   bin/bundle-libs [runtime-name]
+#
+# WHY THIS EXISTS
+#
+# Wine dlopens optional libraries by bare soname and lets the dynamic loader
+# resolve them. On Linux that is correct -- /etc/ld.so.conf.d/ extends the
+# search path. macOS has no equivalent, and dyld's default fallback is /usr/lib
+# plus the shared cache; Homebrew's prefixes are not searched:
+#
+#   $ env -u DYLD_FALLBACK_LIBRARY_PATH ./dltest
+#   libgnutls.30.dylib   tried: '/usr/lib/libgnutls.30.dylib' (no such file)
+#
+# So every such library silently goes missing in any process that does not
+# inherit DYLD_FALLBACK_LIBRARY_PATH -- and the failures are quiet: no Vulkan
+# (Steam decides there is no GPU), no FreeType (no fonts), no gnutls (no TLS).
+#
+# Copying the libraries next to the runtime and pointing configure at absolute
+# paths inside that copy removes the dependency on the environment entirely.
+# It is what CrossOver does, and it is why their Wine needs no such patches.
+#
+# Pair this with build-runtime, which seeds ac_cv_lib_soname_* from what this
+# script installs.
+set -euo pipefail
+
+source "$(dirname "$0")/common.sh"
+
+RUNTIME="${1:-$DEFAULT_RUNTIME}"
+RT="$RUNTIMES_DIR/$RUNTIME"
+[ -d "$RT" ] || die "no such runtime: $RUNTIME"
+DEST="$RT/lib/bundled"
+
+case "$RUNTIME" in
+    *-x86_64) BREW=/usr/local ;;
+    *)        BREW=/opt/homebrew ;;
+esac
+
+# The libraries Wine dlopens by soname that we actually care about. Add to this
+# list when a new silent failure turns up -- and note that finding one is the
+# symptom of this whole class, not a one-off.
+WANT=(
+    "$BREW/opt/molten-vk/lib/libMoltenVK.dylib"
+    "$BREW/lib/libvulkan.1.dylib"
+    "$BREW/opt/freetype/lib/libfreetype.6.dylib"
+    "$BREW/opt/gnutls/lib/libgnutls.30.dylib"
+)
+
+mkdir -p "$DEST"
+info "bundling into $DEST"
+
+# Resolve a dylib's non-system dependencies, recursively.
+deps_of() {
+    otool -L "$1" 2>/dev/null | tail -n +2 | awk '{print $1}' \
+        | grep -vE '^/usr/lib/|^/System/' || true
+}
+
+declare -a queue=()
+for l in "${WANT[@]}"; do
+    [ -e "$l" ] || die "missing: $l  (run bin/provision-host)"
+    queue+=("$(readlink -f "$l" 2>/dev/null || python3 -c "import os,sys;print(os.path.realpath(sys.argv[1]))" "$l")")
+done
+
+declare -a seen=()
+have() { local n; for n in ${seen[@]+"${seen[@]}"}; do [ "$n" = "$1" ] && return 0; done; return 1; }
+
+# A library is referenced by one name (libhogweed.6.dylib) but its realpath is
+# another (libhogweed.6.11.dylib). Copy under the real name and symlink the
+# referenced one, or the install-name rewrite below silently fails to match and
+# the bundle keeps pointing back at Homebrew.
+alias_for() {  # referenced-path -> record an alias symlink if needed
+    local ref_base real_base
+    ref_base="$(basename "$1")"
+    real_base="$(basename "$(python3 -c "import os,sys;print(os.path.realpath(sys.argv[1]))" "$1")")"
+    [ "$ref_base" = "$real_base" ] || echo "$ref_base $real_base"
+}
+
+declare -a aliases=()
+while [ ${#queue[@]} -gt 0 ]; do
+    lib="${queue[0]}"; queue=("${queue[@]:1}")
+    base="$(basename "$lib")"
+    have "$base" && continue
+    seen+=("$base")
+    cp -f "$lib" "$DEST/$base"
+    chmod u+w "$DEST/$base"
+    while read -r d; do
+        [ -n "$d" ] || continue
+        a="$(alias_for "$d")"; [ -n "$a" ] && aliases+=("$a")
+        real="$(python3 -c "import os,sys;print(os.path.realpath(sys.argv[1]))" "$d" 2>/dev/null || echo "$d")"
+        [ -e "$real" ] && queue+=("$real")
+    done < <(deps_of "$lib")
+done
+
+for a in ${aliases[@]+"${aliases[@]}"}; do :; done
+printf '%s\n' ${aliases[@]+"${aliases[@]}"} | sort -u | while read -r ref real; do
+    [ -n "$ref" ] && [ -e "$DEST/$real" ] && ln -sf "$real" "$DEST/$ref"
+done
+
+# Rewrite install names so the copies reference each other inside the bundle
+# rather than reaching back into Homebrew -- otherwise a `brew upgrade` still
+# breaks us and the bundle is decorative.
+info "rewriting install names (${#seen[@]} libraries)"
+for base in "${seen[@]}"; do
+    f="$DEST/$base"
+    install_name_tool -id "@loader_path/$base" "$f" 2>/dev/null || true
+    while read -r d; do
+        [ -n "$d" ] || continue
+        db="$(basename "$d")"
+        # match against what is actually in the bundle, including alias symlinks
+        [ -e "$DEST/$db" ] && install_name_tool -change "$d" "@loader_path/$db" "$f" 2>/dev/null || true
+    done < <(deps_of "$f")
+    codesign --force -s - "$f" >/dev/null 2>&1 || true   # ad-hoc re-sign after edit
+done
+
+# Sonames Wine looks for must exist under their canonical names.
+for l in "${WANT[@]}"; do
+    b="$(basename "$l")"
+    real="$(basename "$(python3 -c "import os,sys;print(os.path.realpath(sys.argv[1]))" "$l")")"
+    [ "$b" = "$real" ] || ln -sf "$real" "$DEST/$b"
+done
+
+echo
+info "bundled $(ls "$DEST" | wc -l | tr -d ' ') files:"
+ls "$DEST" | sed 's|^|    |'
+info "configure should now be seeded with paths under $DEST -- bin/build-runtime does this"

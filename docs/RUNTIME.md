@@ -10,77 +10,56 @@ beliefs cost more time than the right ones.
 
 ---
 
-## 1. The one bug that mattered most
+## 1. Bundled libraries — the platform mismatch, and the real fix
 
-**Wine on macOS `dlopen`s host libraries by bare soname.** A bare soname
-resolves only through `DYLD_FALLBACK_LIBRARY_PATH`, and dyld's default fallback
-list does not cover Homebrew. Any process Wine spawns *without* that variable
-inherited therefore sees the library as absent.
-
-It appears in three independent places, and each fails differently and
-**silently**:
-
-| patch | site | what breaks |
-| ----- | ---- | ----------- |
-| `wine-0002` | `dlls/win32u/vulkan.c` | `vkEnumerateInstanceVersion` missing → caller assumes Vulkan 1.0 → Steam decides the machine has no GPU |
-| `wine-0003` | `dlls/win32u/freetype.c` | no GDI fonts in spawned processes |
-| `wine-0006` | `dlls/dwrite/freetype.c` | **no text in any DirectWrite application** |
-
-The third is the nastiest. `dwrite` keeps its *own* FreeType handle, separate
-from `win32u`'s, so fixing `win32u` repairs GDI text and leaves DirectWrite text
-broken. And it does not report an error: `DWriteCreateFactory`,
-`CreateFontFace` and `CreateGlyphRunAnalysis` all return `S_OK`, and
-`GetAlphaTextureBounds` simply reports `0x0`. Skia asks for the glyph box, is
-told the glyph is empty, and never rasterises. A Chromium app then draws its
-entire UI — images, gradients, controls, even the blinking text caret — with no
-text at all.
-
-Reproduce in isolation, no Steam required:
-
-```sh
-tools/probes/build.sh
-wine tools/probes/glyphprobe.exe
-#  broken: GetAlphaTextureBounds(1x1) hr=0 bounds=(0,0)-(0,0)     0x0
-#   fixed: GetAlphaTextureBounds(1x1) hr=0 bounds=(-1,-12)-(11,0) 12x12
-#          CreateAlphaTexture(1x1)    hr=0 non-zero bytes = 65 / 144
-```
-
-**These are workarounds for a platform mismatch, not upstream bug fixes.**
-An earlier version of this file called them "genuinely upstreamable". That was
-wrong, and worth stating plainly.
-
-Wine `dlopen`s by soname *by design* -- `WINE_CHECK_SONAME` in `aclocal.m4`
-records only the soname, never a path -- and delegates resolution to the dynamic
-loader. That is correct on Linux, which has `/etc/ld.so.conf.d/` to extend the
-search path. **macOS has no equivalent**, and dyld's default fallback is
-`/usr/lib` plus the shared cache only:
+Wine `dlopen`s optional libraries **by bare soname, by design**:
+`WINE_CHECK_SONAME` in `aclocal.m4` records only the soname, never a path, and
+delegates resolution to the dynamic loader. That is correct on Linux, which has
+`/etc/ld.so.conf.d/` to extend the search path. **macOS has no equivalent**, and
+dyld searches only `/usr/lib` plus the shared cache:
 
 ```
 $ env -u DYLD_FALLBACK_LIBRARY_PATH ./dltest
-libgnutls.30.dylib   dlopen(...): tried: '/usr/lib/libgnutls.30.dylib'
-                     (no such file, not in dyld cache)
+libgnutls.30.dylib   tried: '/usr/lib/libgnutls.30.dylib' (no such file, not in dyld cache)
 /usr/local/lib/libgnutls.30.dylib   OK
 ```
 
-(Note `/usr/local/lib` is *not* searched, despite older documentation listing
-`$HOME/lib:/usr/local/lib:/lib:/usr/lib` as the default.)
+Note `/usr/local/lib` is **not** searched, despite older documentation listing
+`$HOME/lib:/usr/local/lib:/lib:/usr/lib` as the default fallback.
 
-So there are three legitimate answers, and upstream would likely reject the
-first: hardcode paths (what we do), set `DYLD_FALLBACK_LIBRARY_PATH` for every
-process, or **bundle the libraries** -- which is what CrossOver does, and why
-their `dlls/dwrite/freetype.c` is unmodified upstream while ours needed a patch.
+So every library Wine dlopens goes silently missing in any process that does not
+inherit `DYLD_FALLBACK_LIBRARY_PATH`. The failures are quiet and look like
+unrelated application bugs:
 
-Our patches are pragmatic and they work. But if these ever go upstream they
-should go as a build/packaging change, not as per-site path lists. Sites found
-so far: `win32u/vulkan.c`, `win32u/freetype.c`, `dwrite/freetype.c`,
-`crypt32/unixlib.c`, `secur32/schannel_gnutls.c` -- and the fact that the list
-keeps growing is itself the argument that patching sites is the wrong shape.
+| library | what it looks like when missing |
+| ------- | ------------------------------- |
+| vulkan | `vkEnumerateInstanceVersion` absent → caller assumes Vulkan 1.0 → Steam decides the machine has no GPU |
+| freetype (win32u) | no GDI fonts in spawned processes |
+| freetype (dwrite) | **no text at all in DirectWrite apps** — every call returns `S_OK`, `GetAlphaTextureBounds` just reports `0x0`, so Skia is told the glyph is empty and never rasterises |
+| gnutls | no TLS; `crypt32` and `secur32` both fail |
 
-Not a regression: pristine upstream Wine 11.0 fails identically. CrossOver
-escapes it only by bundling FreeType so their bare soname resolves — their
-`dlls/dwrite/freetype.c` is unmodified upstream.
+**The fix is bundling, not patching.** `bin/bundle-libs` copies the libraries
+into `runtimes/<name>/lib/bundled` together with their transitive dependencies,
+rewrites install names to `@loader_path`, and re-signs them ad hoc.
+`bin/build-runtime` then seeds configure's soname cache:
 
----
+```
+./configure ac_cv_lib_soname_gnutls=<bundle>/libgnutls.30.dylib ...
+```
+
+`SONAME_LIB*` becomes an absolute path into the bundle, so **every** dlopen site
+resolves — including ones nobody has hit yet — with no source change and no
+environment variable. `build-runtime` fails the build if any soname comes out
+bare, since that would silently produce a degraded runtime.
+
+Verified with no environment set at all: glyph rasterisation returns a 12x12
+box with 65 non-zero bytes, Vulkan reports 1.4.0, gnutls loads, and Steam's GPU
+topology query returns `k_EGpuDriverId_MoltenVK` with exit code 0.
+
+We previously carried five per-site patches hardcoding Homebrew paths. They
+worked, but five sites of one pattern is a policy, not five bugs — they are
+retracted, in `patches/retracted/`. This is also why CrossOver needs no such
+patches: they bundle.
 
 ## 2. The workaround we still carry
 

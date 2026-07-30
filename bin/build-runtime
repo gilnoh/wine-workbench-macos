@@ -60,6 +60,23 @@ fi
 "$GAMES_ROOT/bin/provision-host" --check >/dev/null 2>&1 \
     || die "host provisioning incomplete -- run bin/provision-host"
 
+# --- bundled libraries ----------------------------------------------------
+# Wine dlopens optional libraries by bare soname; macOS has no ld.so.conf
+# equivalent and dyld will not find Homebrew. Bundle them and seed configure's
+# soname cache with absolute paths into the bundle, so no source patch and no
+# environment variable is involved. See docs/RUNTIME.md.
+info "bundling host libraries"
+"$GAMES_ROOT/bin/bundle-libs" "wine-$VERSION-x86_64" >/dev/null || die "bundle-libs failed"
+BUNDLE="$PREFIX/lib/bundled"
+
+SEED=""
+for pair in "vulkan:libvulkan.1.dylib" "freetype:libfreetype.6.dylib" "gnutls:libgnutls.30.dylib"; do
+    name="${pair%%:*}"; lib="${pair##*:}"
+    [ -e "$BUNDLE/$lib" ] || die "bundle missing $lib"
+    SEED="$SEED ac_cv_lib_soname_$name=$BUNDLE/$lib"
+done
+info "  seeding configure with absolute sonames from the bundle"
+
 # --- patches --------------------------------------------------------------
 info "applying patches from $(basename "$SERIES")"
 applied=0 skipped=0
@@ -101,7 +118,7 @@ export CXX="g++ -arch x86_64"
 mkdir -p "$BUILD"
 cd "$BUILD"
 if [ ! -f Makefile ]; then
-  "$SRC/configure" \\
+  "$SRC/configure" $SEED \\
     --build=x86_64-apple-darwin \\
     --enable-archs=i386,x86_64 \\
     --prefix="$PREFIX" \\
@@ -127,7 +144,11 @@ info "verifying"
 cfg="$BUILD/include/config.h"
 for s in SONAME_LIBVULKAN SONAME_LIBFREETYPE SONAME_LIBGNUTLS; do
     grep -q "define $s" "$cfg" || die "configure did not find $s -- runtime would be degraded"
+    # A bare soname here means the seeding did not take, and the runtime would
+    # silently lose that library in any process without DYLD_FALLBACK_LIBRARY_PATH.
+    grep -qE "define $s \"/" "$cfg" || die "$s is a bare soname, not an absolute path -- seeding failed"
 done
+info "  sonames are absolute paths into the bundle"
 for a in x86_64-windows i386-windows x86_64-unix; do
     [ -d "$PREFIX/lib/wine/$a" ] || die "missing arch dir: $a"
 done

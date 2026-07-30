@@ -5,13 +5,9 @@
 #   debug      diagnostic only; NOT applied by default
 #
 # class       patch
-# NOTE: the "fix" class is aspirational for the dlopen patches -- see
-# docs/RUNTIME.md section 1. They are workarounds for a macOS/Linux platform
-# difference, not upstream-shaped fixes.
-fix           wine-0002-win32u-vulkan-absolute-dylib-fallback.patch
-fix           wine-0003-win32u-freetype-absolute-dylib-fallback.patch
-fix           wine-0006-dwrite-freetype-absolute-dylib-fallback.patch
-fix           wine-0007-gnutls-absolute-dylib-fallback.patch
+# The dlopen/soname patches that used to live here are retracted -- see
+# patches/retracted/README.md. bin/bundle-libs plus soname seeding in
+# bin/build-runtime replaces all of them.
 workaround    wine-0004-kernelbase-append-args-env.patch
 debug         wine-0005-winemac-surface-flush-trace.patch
 
