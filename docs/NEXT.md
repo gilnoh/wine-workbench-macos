@@ -2,8 +2,65 @@
 
 ## ⚠️ THE PIVOT — read this before anything else (decided 2026-07-30)
 
-**We are changing the base from upstream Wine to CrossOver's Wine.** Do not start
-new work against `src/wine` (upstream 11.14).
+### DECISION
+
+**Our base is WineCX — CodeWeavers' published CrossOver Wine source — not upstream
+Wine.** Do not start new work against `src/wine` (upstream 11.14).
+
+`patches/series` keeps its role, but from now on it holds **only our own deltas on
+top of WineCX**. If a patch there is a port of a `CW HACK`, that is a smell: it
+means we are re-deriving, and the answer is to take it from the base instead.
+
+**STILL TO DECIDE: which version — 26.0.0 or 26.3.0?** The trade-off is *not* about
+features; it is about keeping the A/B reference:
+
+| | 26.0.0 | 26.3.0 |
+| --- | ------ | ------ |
+| matches the CrossOver **currently installed** (26.0) | ✅ A/B against a working bottle stays possible | ❌ source newer than the app |
+| we already have the tarball on disk | ✅ `src/crossover-sources-26.0.0.tar.gz` | ❌ 142 MB download |
+| newest fixes | ❌ | ✅ |
+
+The A/B reference was decisive **four separate times** in one session (the `lretq`
+diff, the `WINEMSYNC=1` discovery, the `winmm` null result, the paint hacks). Do not
+give it up to gain a few months of fixes. **Rule: the source version must match the
+installed CrossOver.app version.** Gil is renewing the licence to get the latest
+app — so pick whichever version the freshly-installed app reports, and check with:
+
+```sh
+/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
+  /Applications/CrossOver.app/Contents/Info.plist
+```
+
+### Terminology, because three version numbers get confused
+
+- **CX = CrossOver, CW = CodeWeavers.** Both appear as source markers, inconsistently:
+  `CW HACK` (91), `CW Hack` (76), `CrossOver Hack` (56), `CX HACK` (28), `CXHACK` (20).
+  Their shipped binaries are `cx`-prefixed throughout (`cxbottle.conf`,
+  `cxinstallfonts.exe`, `cxkeepalive.exe`, …) and the build tag is `cxoffice-26.0.0rc2`
+  — CrossOver launched as *CrossOver Office*.
+- **"WineCX-nn" is the community's name, not CodeWeavers'.** They only publish
+  `crossover-sources-<ver>.tar.gz`. The label comes from the Wineskin → Kegworks →
+  Sikarugir lineage, e.g. `WS12WineCX23.7.1` = Wineskin-12 + Wine-from-CrossOver-23.7.1.
+  `PhoenicisOrg/winecx` tags them `winecx-25.1.0`.
+- ⚠️ **The number in `WineCX-nn` is the CROSSOVER version, not the Wine version.**
+  `WineCX-26.3.0` = CrossOver 26.3.0 = **Wine 11.0** base. `WineCX-23.7.1` = Wine ~8.x.
+  We already tripped on this: `runtimes/wine-cx26.3-x86_64` reports `wine-11.0`, is
+  named for CrossOver 26.3, and was built from source we never had.
+
+**So adopt a naming + provenance convention with the rebase** — a directory name
+cannot carry three facts:
+
+```
+runtimes/winecx-<cxver>-x86_64/PROVENANCE
+  crossover_version: 26.3.0
+  wine_version:      11.0
+  source_tarball:    crossover-sources-26.3.0.tar.gz
+  sha256:            <...>
+  built:             <date>
+```
+
+`bin/build-runtime` should *write and assert* that, so provenance is checkable
+instead of inferred from a folder name.
 
 ### Why
 
@@ -38,14 +95,33 @@ Researched 2026-07-30. **No maintained git repo tracks current CrossOver.**
 | MacPorts `wine-crossover` | Wine 4.0 / CrossOver 18. Dead end. |
 | `benstonezhang/winecx_build` | *"build Wine on macOS with WoW64 from CrossOver source"* — `build.sh`, `brew_install.sh`. Pushed May 2025. **Worth reading before writing our own build.** |
 
-Ecosystem context: Sikarugir (ex-Kegworks, ex-Wineskin) is the maintained macOS
-wrapper and **Gcenx maintains its Wine engines** — but the supported engine is
-`WineCX23.7.1`. Even the curated community builds lag CrossOver badly. Nobody
-tracks 26.x, which is part of why doing it ourselves is worth something.
+Direct download works and needs no auth (substitute the version you settle on):
 
-**So: download `crossover-sources-26.3.0.tar.gz`, commit that tree, treat it as
-the base.** Keep `patches/series` for *our* deltas on top — which should then be
-only genuinely new work.
+```sh
+CXVER=26.3.0   # or 26.0.0 -- see "STILL TO DECIDE" above
+curl -O "https://media.codeweavers.com/pub/crossover/source/crossover-sources-$CXVER.tar.gz"
+```
+
+### Ecosystem context — who else does this, and how far behind they are
+
+Worth knowing so we do not assume a community build already solves our problem:
+
+| project | what it is | Wine it uses |
+| ------- | ---------- | ------------ |
+| **CrossOver** (CodeWeavers) | commercial; Wine part is LGPL and published | its own, **CrossOver 26 = Wine 11.0 + D3DMetal 3.0** |
+| **Sikarugir** (ex-Kegworks, ex-Wineskin) | the maintained free macOS wrapper; toggles for D3DMetal/DXVK/DXMT | **`WineCX23.7.1`** — CrossOver 23.7.1, ~Wine 8.x. Nearly 3 years behind. Engines built by **Gcenx**. |
+| **Whisky** | was the popular SwiftUI wrapper | **discontinued/archived April 2025** — author's stated reason was that it siphoned sales from CrossOver, which funds macOS Wine. Not a base. |
+| **Apple GPTK** | Apple's Game Porting Toolkit (D3DMetal) | CodeWeavers-derived; a dev tool, not an end-user base |
+| **Gcenx/macOS_Wine_builds** | official WineHQ macOS packages | **upstream** Wine, not CX |
+| **MacPorts `wine-crossover`** | port | **Wine 4.0 / CrossOver 18.** Dead. |
+
+Takeaway: **nobody tracks CrossOver 26.x.** The newest community CX build is ~3
+years old, and the one modern free wrapper (Whisky) is dead. So maintaining a
+current WineCX base is genuinely unoccupied ground — which is the point of doing it
+here rather than re-deriving fixes.
+
+**Plan: fetch the matching `crossover-sources-<ver>.tar.gz`, commit that tree as the
+base, and keep `patches/series` for our own deltas only.**
 
 ### First test after the rebase — validates the whole pivot in one step
 
@@ -308,7 +384,9 @@ took hours to provision. Use a throwaway `bin/mkprefix` prefix.
 
 ## Next actions, in order
 
-**0. THE PIVOT (see top of file).** Rebase onto CrossOver 26.3.0 source. Everything
+**0. THE PIVOT (see top of file).** Rebase onto WineCX — CodeWeavers' published
+CrossOver Wine source. Version still to pick (26.0.0 vs 26.3.0); the rule is that it
+must match the installed CrossOver.app so the A/B reference survives. Everything
 below is either superseded by it or unaffected.
 
 1. ~~Re-apply the wow64cpu fix~~ — **done.** `patches/wine-0006` is applied, built
