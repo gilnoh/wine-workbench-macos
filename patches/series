@@ -10,6 +10,11 @@
 # bin/build-runtime replaces all of them.
 workaround    wine-0004-kernelbase-append-args-env.patch
 debug         wine-0005-winemac-surface-flush-trace.patch
+# Rosetta 2 loses the CS change on the WoW64 far ljmp, so 32-bit PE processes die
+# in an unrecoverable exception-delivery loop. Ported from CrossOver's CW HACK
+# 20760; gated on the VirtualApple brand string, so inert on real x86_64.
+# Without this, NO 32-bit game can be relied on. See docs/NEXT.md.
+workaround    wine-0006-wow64cpu-rosetta2-mode-switch.patch
 
 # DXMT (built separately, see backends/)
 fix           dxmt-0001-include-iomanip.patch
