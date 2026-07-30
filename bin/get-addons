@@ -1,0 +1,52 @@
+#!/bin/bash
+# Fetch the Wine Mono and Gecko MSIs a source build does not include.
+#
+#   bin/get-addons [runtime-name]
+#
+# A distro Wine ships these; building from source does not, and Wine then
+# silently has no .NET and no embedded browser. The failure mode is nasty:
+# a game's .NET launcher exits 255 with no window and no message, which reads
+# as "the game is broken under Wine" rather than "an addon is missing".
+#
+# Versions are read from the Wine source so they always match the runtime --
+# Wine refuses an MSI whose version it did not ask for.
+set -euo pipefail
+
+source "$(dirname "$0")/common.sh"
+
+RUNTIME="${1:-$DEFAULT_RUNTIME}"
+SHARE="$RUNTIMES_DIR/$RUNTIME/share/wine"
+[ -d "$RUNTIMES_DIR/$RUNTIME" ] || die "no such runtime: $RUNTIME"
+
+# The addons header lives in whichever source tree built this runtime.
+addons=""
+for c in "$GAMES_ROOT/src/wine/dlls/appwiz.cpl/addons.c" \
+         "$GAMES_ROOT/src/wine-${RUNTIME#wine-}/dlls/appwiz.cpl/addons.c"; do
+    [ -f "$c" ] && { addons="$c"; break; }
+done
+[ -n "$addons" ] || die "cannot find appwiz.cpl/addons.c to read the expected versions"
+
+MONO=$(grep -m1 '#define MONO_VERSION' "$addons" | tr -d '"' | awk '{print $3}')
+GECKO=$(grep -m1 '#define GECKO_VERSION' "$addons" | tr -d '"' | awk '{print $3}')
+[ -n "$MONO" ] && [ -n "$GECKO" ] || die "could not parse versions from $addons"
+info "runtime $RUNTIME expects mono $MONO, gecko $GECKO"
+
+fetch() {  # url dest
+    if [ -s "$2" ]; then info "  have $(basename "$2")"; return 0; fi
+    info "  fetching $(basename "$2")"
+    curl -fsSL --max-time 900 -o "$2.part" "$1" || { rm -f "$2.part"; die "download failed: $1"; }
+    mv "$2.part" "$2"
+}
+
+mkdir -p "$SHARE/mono" "$SHARE/gecko"
+fetch "https://dl.winehq.org/wine/wine-mono/$MONO/wine-mono-$MONO-x86.msi" \
+      "$SHARE/mono/wine-mono-$MONO-x86.msi"
+# Both gecko architectures: a WoW64 prefix installs the 32-bit one too.
+for arch in x86 x86_64; do
+    fetch "https://dl.winehq.org/wine/wine-gecko/$GECKO/wine-gecko-$GECKO-$arch.msi" \
+          "$SHARE/gecko/wine-gecko-$GECKO-$arch.msi"
+done
+
+info "addons ready under $SHARE"
+info "  new prefixes pick these up automatically; for an existing prefix:"
+info "    WINEPREFIX=... wine msiexec /i <path-to-msi> /qn"

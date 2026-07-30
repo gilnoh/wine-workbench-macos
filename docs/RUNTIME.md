@@ -249,3 +249,41 @@ theories; the refuted list in `NEXT.md` exists so they are not chased twice.
   their shipped binaries?** Same tree, but GPU identification falls back to a
   dummy card. Their build configuration or bundled dependencies differ in a way
   we have not identified.
+
+---
+
+## 8. Addons a source build does not include
+
+A distribution Wine ships Wine Mono and Gecko; **building from source does
+not**. `bin/get-addons` fetches them into `runtimes/<name>/share/wine/`, reading
+the required versions straight out of `dlls/appwiz.cpl/addons.c` so they match
+the runtime — Wine refuses an MSI whose version it did not ask for.
+
+This matters more than it sounds. Plenty of games ship a small .NET launcher:
+Strategic Command's `Launcher.exe` imports **only** `mscoree.dll` and
+`user32.dll`. With no .NET runtime it exits **255, silently, with no window** —
+which looks exactly like the game being incompatible rather than an addon being
+absent. Steam's `console_log.txt` showed the tell: `Game process added` followed
+by `Game process removed` two seconds later.
+
+`bin/mkprefix` installs Mono into new prefixes when the runtime has it.
+
+## 9. Launching Steam games
+
+Two things that are not obvious:
+
+- **Launch through Steam, not the game exe.** Running the game binary directly
+  makes `steam_api.dll` re-launch it via `steam://run/<appid>` and exit — the
+  original process returns 53 and nothing appears to happen. Worse, the hand-off
+  goes through Wine's URL handler, which does **not** inherit our environment,
+  so the Steam it starts has no `WINE_APPEND_ARGS` and its window is black.
+  Profiles therefore use `EXE=steam.exe` with `ARGS="-applaunch <appid>"`.
+- **`WINE_APPEND_ARGS` is set by `bin/gamerun` for every launch**, not per
+  profile. The injection is keyed on image name so it is inert for anything that
+  is not `steamwebhelper.exe`, and scoping it to the Steam profile only meant
+  any game that brought up the client got a black Steam.
+
+Also note Steam creates a `SteamLibrary/steamapps/` tree under whatever mount
+point is registered, so the shared library path is `S:\SteamLibrary\steamapps\`.
+Mounting `S:` is not enough on its own — the drive must be added in the client
+(Settings > Storage > '+'), or games install into the prefix instead.

@@ -42,11 +42,18 @@ env_args=(
     PATH="$BIN:$PATH"
     DYLD_FALLBACK_LIBRARY_PATH="$(runtime_dyld_path "$RUNTIME"):${DYLD_FALLBACK_LIBRARY_PATH:-/usr/lib}"
 )
-# macOS grants OpenGL 3.2+ only via a forward-compatible core profile, and
-# upstream winemac.drv rejects 3.2+ requests that lack that bit -- which wined3d
-# does not set, so it silently drops to a legacy 2.1 context (D3D feature level
-# 9_x). Our patched winemac.drv sets the bit when this is 1.
-env_args+=( WINEMAC_FWD_COMPAT_GL_CTX=1 )
+# Chromium's software compositor runs in the viz process and blits into a window
+# owned by the browser process; Wine's window surfaces are per-process, so those
+# pixels are dropped and the window is black. --in-process-gpu makes viz a thread
+# of the browser process. See docs/RUNTIME.md.
+#
+# This is set for EVERY launch, not just the Steam client profile, and that is
+# deliberate: the injection is keyed on the image name, so it is inert for
+# anything that is not steamwebhelper.exe. Scoping it per-profile bought nothing
+# and actively caused a black client -- launching a game directly starts Steam
+# through steam_api.dll with whatever environment the game got, and the overlay
+# is CEF too. A profile can still override it via PROFILE_ENV.
+env_args+=( 'WINE_APPEND_ARGS=steamwebhelper.exe=--no-sandbox --in-process-gpu --disable-gpu' )
 
 # Deliberately NOT setting VK_ICD_FILENAMES. Pointing it at MoltenVK's own ICD
 # is actively harmful: that manifest carries is_portability_driver:true, so the

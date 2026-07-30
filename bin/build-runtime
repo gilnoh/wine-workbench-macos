@@ -1,0 +1,140 @@
+#!/bin/bash
+# Build a Wine runtime from source with our patches applied.
+#
+#   bin/build-runtime [--version 11.14] [--jobs 8] [--with-debug] [--keep-going]
+#
+# Produces runtimes/wine-<version>-x86_64 from src/wine-<version>, building in
+# build/wine-<version>-x86_64. Existing runtimes are left alone unless --force.
+#
+# Why this script exists rather than a page of instructions: three of the traps
+# below are silent. They do not fail the build, they produce a runtime that is
+# subtly wrong -- missing gnutls, or mixing architectures -- and you find out
+# hours later. See docs/RUNTIME.md.
+set -uo pipefail
+
+source "$(dirname "$0")/common.sh"
+
+VERSION=11.14
+JOBS=8
+WITH_DEBUG=0
+FORCE=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --version) VERSION="$2"; shift 2 ;;
+        --jobs)    JOBS="$2"; shift 2 ;;
+        --with-debug) WITH_DEBUG=1; shift ;;     # also apply class 'debug' patches
+        --force)   FORCE=1; shift ;;
+        *) die "unknown option: $1" ;;
+    esac
+done
+
+BUILD="$GAMES_ROOT/build/wine-$VERSION-x86_64"
+PREFIX="$GAMES_ROOT/runtimes/wine-$VERSION-x86_64"
+SERIES="$GAMES_ROOT/patches/series"
+
+# Prefer a version-named tree; fall back to src/wine when it is checked out at
+# the requested version, which is how this repo has been laid out so far.
+SRC="$GAMES_ROOT/src/wine-$VERSION"
+if [ ! -d "$SRC" ]; then
+    alt="$GAMES_ROOT/src/wine"
+    if [ -d "$alt" ] && [ "$(git -C "$alt" describe --tags 2>/dev/null)" = "wine-$VERSION" ]; then
+        SRC="$alt"
+        info "using $alt (checked out at wine-$VERSION)"
+    else
+        die "no source tree for wine-$VERSION
+  Looked for: $SRC
+          and: $alt (checked out at wine-$VERSION)
+  Get one with:
+    git clone --depth 1 -b wine-$VERSION https://gitlab.winehq.org/wine/wine.git src/wine-$VERSION"
+    fi
+fi
+[ -f "$SERIES" ] || die "no patch series at $SERIES"
+
+if [ -e "$PREFIX" ] && [ "$FORCE" = 0 ]; then
+    die "runtime already exists: $PREFIX  (use --force to rebuild over it)"
+fi
+
+# --- host sanity ----------------------------------------------------------
+# A missing dependency here shows up as a *silently degraded* runtime, not as a
+# build failure, so check before spending twenty minutes compiling.
+"$GAMES_ROOT/bin/provision-host" --check >/dev/null 2>&1 \
+    || die "host provisioning incomplete -- run bin/provision-host"
+
+# --- patches --------------------------------------------------------------
+info "applying patches from $(basename "$SERIES")"
+applied=0 skipped=0
+while read -r class patch; do
+    case "${class:-}" in ''|\#*) continue ;; esac
+    case "$patch" in dxmt-*) continue ;; esac          # DXMT builds separately
+    if [ "$class" = debug ] && [ "$WITH_DEBUG" = 0 ]; then
+        info "  skip  $patch (class debug)"
+        skipped=$((skipped+1)); continue
+    fi
+    p="$GAMES_ROOT/patches/$patch"
+    [ -f "$p" ] || die "missing patch: $p"
+    if git -C "$SRC" apply --check "$p" 2>/dev/null; then
+        git -C "$SRC" apply "$p" || die "failed to apply $patch"
+        info "  apply $patch ($class)"
+        applied=$((applied+1))
+    elif git -C "$SRC" apply --reverse --check "$p" 2>/dev/null; then
+        info "  ok    $patch (already applied)"
+        applied=$((applied+1))
+    else
+        die "patch does not apply and is not already applied: $patch"
+    fi
+done < "$SERIES"
+info "patches: $applied applied, $skipped skipped"
+
+# --- build ----------------------------------------------------------------
+# Everything below must run in an x86_64 shell AND with CC forced, including
+# for configure. Plain `gcc` under `arch -x86_64` still targets arm64 here, and
+# configure's link tests then fail against the x86_64 Homebrew libraries --
+# silently dropping gnutls, freetype and vulkan from the resulting runtime.
+build_script="$(mktemp)"
+trap 'rm -f "$build_script"' EXIT
+cat > "$build_script" <<EOF
+#!/bin/zsh
+source "$GAMES_ROOT/bin/env-build-x86_64.sh" || exit 1
+set -e
+export CC="gcc -arch x86_64"
+export CXX="g++ -arch x86_64"
+mkdir -p "$BUILD"
+cd "$BUILD"
+if [ ! -f Makefile ]; then
+  "$SRC/configure" \\
+    --build=x86_64-apple-darwin \\
+    --enable-archs=i386,x86_64 \\
+    --prefix="$PREFIX" \\
+    --disable-tests --with-vulkan --with-mingw --with-freetype --with-gnutls --without-x
+fi
+make CC="gcc -arch x86_64" -j$JOBS
+make install
+echo BUILD_OK
+EOF
+chmod +x "$build_script"
+
+info "building wine-$VERSION (jobs=$JOBS) -- this takes a while"
+log="$GAMES_ROOT/build/wine-$VERSION-build.log"
+arch -x86_64 /bin/zsh "$build_script" > "$log" 2>&1
+grep -q BUILD_OK "$log" || die "build failed -- see $log
+  last lines:
+$(tail -5 "$log")"
+
+# --- verify ---------------------------------------------------------------
+# A build that "succeeded" can still be wrong. Check the things that fail
+# silently: the optional dependencies, and that both architectures are present.
+info "verifying"
+cfg="$BUILD/include/config.h"
+for s in SONAME_LIBVULKAN SONAME_LIBFREETYPE SONAME_LIBGNUTLS; do
+    grep -q "define $s" "$cfg" || die "configure did not find $s -- runtime would be degraded"
+done
+for a in x86_64-windows i386-windows x86_64-unix; do
+    [ -d "$PREFIX/lib/wine/$a" ] || die "missing arch dir: $a"
+done
+ver=$(DYLD_FALLBACK_LIBRARY_PATH="$(runtime_dyld_path "wine-$VERSION-x86_64"):/usr/lib" \
+      WINEDEBUG=-all "$PREFIX/bin/wine" --version 2>/dev/null)
+info "  version:   $ver"
+info "  32-bit builtins: $(ls "$PREFIX/lib/wine/i386-windows" | wc -l | tr -d ' ')"
+info "  deps:      vulkan freetype gnutls all found"
+
+info "runtime ready: $PREFIX"

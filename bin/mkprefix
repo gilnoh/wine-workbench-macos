@@ -1,23 +1,33 @@
 #!/bin/bash
-# Create a fresh Wine prefix and point it at the shared Steam library.
+# Create a fresh Wine prefix, provision it, and point it at the shared Steam
+# library.
 #
 #   bin/mkprefix <prefix-name> [runtime-name]
+#   bin/mkprefix <prefix-name> --no-provision      skip the winetricks step
 #
-# The prefix itself stays small (~400MB). Game data lives in library/steamapps,
-# which is mounted into the prefix as drive S: so every prefix sees the same
-# installed games without duplicating them.
+# The prefix itself stays small. Game data lives in library/steamapps, mounted
+# as drive S: so every prefix sees the same installed games without duplicating
+# them -- but note Steam only *uses* S: if it is registered as a library folder,
+# which register_steam_library() below does.
 
 source "$(dirname "$0")/common.sh"
 
-NAME="${1:-}"
-RUNTIME="${2:-$DEFAULT_RUNTIME}"
-[ -n "$NAME" ] || die "usage: mkprefix <prefix-name> [runtime-name]"
+NAME=""
+RUNTIME="$DEFAULT_RUNTIME"
+PROVISION=1
+for arg in "$@"; do
+    case "$arg" in
+        --no-provision) PROVISION=0 ;;
+        *) if [ -z "$NAME" ]; then NAME="$arg"; else RUNTIME="$arg"; fi ;;
+    esac
+done
+[ -n "$NAME" ] || die "usage: mkprefix <prefix-name> [runtime-name] [--no-provision]"
 
 PREFIX_PATH="$PREFIXES_DIR/$NAME"
 [ -e "$PREFIX_PATH" ] && die "prefix '$NAME' already exists at $PREFIX_PATH"
 
 BIN="$(runtime_bin "$RUNTIME")"
-
+DYLD="$(runtime_dyld_path "$RUNTIME"):/usr/lib"
 
 info "creating prefix '$NAME' with runtime '$RUNTIME'"
 mkdir -p "$PREFIX_PATH"
@@ -27,15 +37,74 @@ mkdir -p "$PREFIX_PATH"
 env WINEPREFIX="$PREFIX_PATH" \
     WINEDLLOVERRIDES="mscoree,mshtml=" \
     PATH="$BIN:$PATH" \
-    DYLD_FALLBACK_LIBRARY_PATH="$(runtime_dyld_path "$RUNTIME"):/usr/lib" \
+    DYLD_FALLBACK_LIBRARY_PATH="$DYLD" \
     "$BIN/wineboot" --init 2>&1 | grep -viE "^wine: created|fixme:" || true
 
 info "waiting for wineserver to settle"
 env WINEPREFIX="$PREFIX_PATH" PATH="$BIN:$PATH" "$BIN/wineserver" -w
 
-# Mount the shared Steam library as drive S:.
-mkdir -p "$LIBRARY_DIR/steamapps"
+# Mount the shared Steam library as drive S:. Steam itself creates a
+# SteamLibrary/steamapps/ tree underneath once the drive is registered in the
+# client, so do not pre-create steamapps/ here -- it only ends up unused.
 ln -sfn "$LIBRARY_DIR" "$PREFIX_PATH/dosdevices/s:"
+
+# --- provisioning ---------------------------------------------------------
+# Every prefix gets these two. Both were learned the hard way:
+#
+#   corefonts       Wine ships only 6 fonts (tahoma, symbol, wingdings,
+#                   marlett, webdings). Anything expecting Arial/Times renders
+#                   with fallbacks or not at all.
+#   d3dcompiler_47  Wine's builtin is a vkd3d-shader wrapper; CEF and many
+#                   D3D11 games need the genuine Microsoft compiler. winetricks
+#                   also writes the native override into the prefix registry,
+#                   so nothing has to force it at launch.
+#
+# Wine Mono is installed too when the runtime has it (see below). Plenty of
+# games ship a small .NET launcher -- Strategic Command's Launcher.exe imports
+# mscoree.dll and nothing else -- and without a .NET runtime it exits 255 with
+# no message at all, which looks exactly like the game being broken.
+if [ "$PROVISION" = 1 ]; then
+    WINETRICKS="$(dirname "$0")/vendor/winetricks"
+    if [ ! -x "$WINETRICKS" ]; then
+        info "fetching pinned winetricks"
+        "$(dirname "$0")/get-winetricks" || die "could not fetch winetricks"
+    fi
+    info "provisioning: corefonts d3dcompiler_47"
+    env WINEPREFIX="$PREFIX_PATH" \
+        WINE="$BIN/wine" WINESERVER="$BIN/wineserver" \
+        DYLD_FALLBACK_LIBRARY_PATH="$DYLD" \
+        PATH="$BIN:/opt/homebrew/bin:$PATH" \
+        WINEDEBUG=-all \
+        "$WINETRICKS" -q corefonts d3dcompiler_47 >/dev/null 2>&1 \
+        || die "winetricks provisioning failed (is cabextract installed? see bin/provision-host)"
+    n=$(ls "$PREFIX_PATH/drive_c/windows/Fonts" 2>/dev/null | wc -l | tr -d ' ')
+    info "  fonts installed: $n"
+
+    # Wine Mono, if the runtime carries it. A source build does not download the
+    # mono/gecko MSIs, so bin/get-addons fetches them into share/wine/.
+    mono_msi=$(ls "$(dirname "$BIN")/../share/wine/mono/"wine-mono-*.msi 2>/dev/null | head -1)
+    if [ -n "$mono_msi" ]; then
+        info "provisioning: wine-mono ($(basename "$mono_msi"))"
+        env WINEPREFIX="$PREFIX_PATH" PATH="$BIN:$PATH" \
+            DYLD_FALLBACK_LIBRARY_PATH="$DYLD" WINEDEBUG=-all \
+            "$BIN/wine" msiexec /i "$(cd "$(dirname "$mono_msi")" && pwd)/$(basename "$mono_msi")" /qn >/dev/null 2>&1
+        env WINEPREFIX="$PREFIX_PATH" PATH="$BIN:$PATH" "$BIN/wineserver" -w
+        [ -d "$PREFIX_PATH/drive_c/windows/mono" ] && info "  wine-mono installed" \
+            || info "  WARNING: wine-mono install did not take"
+    else
+        info "  no wine-mono in the runtime -- run bin/get-addons (games with .NET"
+        info "  launchers will exit 255 silently without it)"
+    fi
+fi
 
 info "prefix ready: $PREFIX_PATH"
 info "  shared library mounted at S:  ->  $LIBRARY_DIR"
+if [ "$NAME" != "${NAME%steam*}" ] || [ -d "$PREFIX_PATH/drive_c/Program Files (x86)/Steam" ]; then
+    info ""
+    info "  NOTE: mounting S: is not enough -- Steam ignores it until it is added"
+    info "  as a library folder. Steam owns that config (steamapps/libraryfolders.vdf)"
+    info "  and rewrites it, so add it from the client rather than by hand:"
+    info "      Steam > Settings > Storage > '+' > S:\\"
+    info "  Otherwise games install into the prefix and a per-game prefix later"
+    info "  means downloading them again."
+fi
