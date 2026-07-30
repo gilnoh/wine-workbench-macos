@@ -1,0 +1,50 @@
+1720523.668:05b8:05bc:trace:seh:dispatch_exception code=40010006 (DBG_PRINTEXCEPTION_C) flags=0 addr=000000007AEBAAF7
+1720523.668:05b8:05bc:trace:seh:dispatch_exception rip=00006fffe6b014fd rsp=000000010020f010 rbp=000000000299c878 eflags=00200202
+1720523.668:05b8:05bc:trace:seh:call_seh_handlers calling handler 00006FFFE6B01508 (rec=000000010020EEF0, frame=10020f010 context=000000010020EA00, dispatch=000000010020E310)
+1720523.669:05b8:05bc:trace:seh:dispatch_exception code=40010006 (DBG_PRINTEXCEPTION_C) flags=0 addr=7AEBAAF7
+1720523.669:05b8:05bc:trace:seh:dispatch_exception eip=7aebaaf7 esp=0299cb60 ebp=0299cbb4 eflags=00200246
+1720523.669:05b8:05bc:trace:seh:dispatch_exception eax=0299cb60 ebx=00000054 ecx=0299cbe8 edx=00000004
+1720523.669:05b8:05bc:trace:seh:dispatch_exception esi=0299d20b edi=0299d1b8 cs=0107 ds=0023 es=0023 fs=010f gs=0023 ss=0023
+1720523.669:05b8:05bc:trace:seh:call_seh_handlers calling handler at 7B427730 code=40010006 flags=0
+1720524.641:05b8:05bc:trace:seh:dispatch_exception code=40010006 (DBG_PRINTEXCEPTION_C) flags=0 addr=000000007AEBAAF7
+1720524.641:05b8:05bc:trace:seh:dispatch_exception rip=00006fffe6b014fd rsp=000000010020f010 rbp=000000000299eb58 eflags=00200202
+1720524.641:05b8:05bc:trace:seh:call_seh_handlers calling handler 00006FFFE6B01508 (rec=000000010020EEF0, frame=10020f010 context=000000010020EA00, dispatch=000000010020E310)
+1720524.641:05b8:05bc:trace:seh:dispatch_exception code=40010006 (DBG_PRINTEXCEPTION_C) flags=0 addr=7AEBAAF7
+1720524.641:05b8:05bc:trace:seh:dispatch_exception eip=7aebaaf7 esp=0299ee40 ebp=0299ee94 eflags=00200246
+1720524.641:05b8:05bc:trace:seh:dispatch_exception eax=0299ee40 ebx=00000054 ecx=0299eec8 edx=00000004
+1720524.641:05b8:05bc:trace:seh:dispatch_exception esi=0299f498 edi=0299f498 cs=0107 ds=0023 es=0023 fs=010f gs=0023 ss=0023
+1720524.641:05b8:05bc:trace:seh:call_seh_handlers calling handler at 7B427730 code=40010006 flags=0
+1720524.722:05b8:05bc:trace:seh:GetModuleBaseNameA 12, L"SETUPAPI.dll"
+1720525.034:05b8:05bc:trace:seh:GetModuleBaseNameA 12, L"SETUPAPI.dll"
+1720525.057:05b8:05bc:trace:seh:GetModuleBaseNameA 12, L"SETUPAPI.dll"
+1720525.063:05b8:05bc:trace:seh:GetModuleBaseNameA 12, L"SETUPAPI.dll"
+1720525.065:05b8:05bc:trace:seh:GetModuleBaseNameA 12, L"SETUPAPI.dll"
+1720525.215:05b8:05bc:trace:seh:signal (2, 00000000)
+1720525.215:05b8:05bc:trace:seh:signal (2, 00000000)
+1720525.215:05b8:05bc:trace:seh:signal (15, 00000000)
+1720525.215:05b8:05bc:trace:seh:signal (15, 00000000)
+1720525.215:05b8:05bc:trace:seh:signal (2, 68108440)
+1720525.215:05b8:05bc:trace:seh:signal (15, 68108440)
+1720525.222:05b8:05bc:trace:seh:GetModuleBaseNameA 12, L"SETUPAPI.dll"
+1720525.225:05b8:05bc:trace:seh:GetModuleBaseNameA 12, L"SETUPAPI.dll"
+1720525.225:05b8:05bc:trace:seh:signal (11, 68101AF0)
+1720525.225:05b8:05bc:trace:seh:signal (8, 68101AF0)
+1720525.474:05b8:05bc:trace:seh:signal (11, 68101AF0)
+1720525.474:05b8:05bc:trace:seh:signal (11, 68101AF0)
+1720525.474:05b8:05bc:trace:seh:signal (8, 68101AF0)
+1720525.474:05b8:05bc:trace:seh:signal (8, 68101AF0)
+1720525.475:05b8:05bc:trace:seh:signal (11, 68101AF0)
+1720525.475:05b8:05bc:trace:seh:signal (11, 68101AF0)
+1720525.475:05b8:05bc:trace:seh:signal (8, 68101AF0)
+1720525.475:05b8:05bc:trace:seh:signal (8, 68101AF0)
+1720525.484:05b8:05bc:trace:seh:GetModuleBaseNameA 12, L"SETUPAPI.dll"
+1720525.938:05b8:05bc:trace:seh:dispatch_exception code=c0000005 (EXCEPTION_ACCESS_VIOLATION) flags=0 addr=000000007B591139
+1720525.938:05b8:05bc:trace:seh:dispatch_exception rip=000000007b591110 rsp=000000010020f5c0 rbp=000000000299f3a4 eflags=00200202
+1720525.938:05b8:05bc:trace:seh:call_seh_handlers calling handler 00006FFFE6B01564 (rec=000000010020F4F0, frame=10020f610 context=000000010020F000, dispatch=000000010020E910)
+1720525.939:05b8:05bc:trace:seh:dispatch_exception code=c0000005 (EXCEPTION_ACCESS_VIOLATION) flags=0 addr=7B591139
+1720525.939:05b8:05bc:trace:seh:dispatch_exception eip=7b591139 esp=7b3f0f0a ebp=0299f3a4 eflags=00200202
+1720525.939:05b8:05bc:trace:seh:dispatch_exception eax=00000099 ebx=0299f9e4 ecx=00000015 edx=5cdbc000
+1720525.939:05b8:05bc:trace:seh:dispatch_exception esi=0299f38b edi=745971e0 cs=0107 ds=0023 es=0023 fs=010f gs=0023 ss=0023
+1720525.939:05b8:05bc:trace:seh:call_seh_handlers calling handler at 74C94367 code=c0000005 flags=0
+1720525.939:05b8:05bc:trace:seh:call_seh_handlers calling handler at 74C94F2D code=c0000005 flags=0
+1720525.939:05b8:05bc:trace:seh:call_seh_handlers calling handler at 0171F7A0 code=c0000005 flags=0

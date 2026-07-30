@@ -1,10 +1,12 @@
 #!/bin/bash
-# Kill every Wine-side process belonging to this tree.
+# Kill Wine-side processes belonging to this tree.
 #
-#   bin/killwine
+#   bin/killwine              fast argv-pattern sweep: everything, Steam included
+#   bin/killwine --game-only  kill only the game; LEAVE the Steam client running
+#   bin/killwine --deep       everything, plus a sweep by open files (~20 s, exact)
 #
 # Wine shares one wineserver per WINEPREFIX, and a half-dead prefix corrupts the
-# next launch, so always run this before relaunching anything.
+# next launch, so always run one of these before relaunching anything.
 #
 # Deliberately matches only Wine-hosted processes (Windows-style argv, our
 # runtime path, wineserver). A native macOS Steam.app -- which also runs a
@@ -12,10 +14,46 @@
 #
 # Do NOT "shut down" Steam with `wine steam.exe -shutdown`: that SPAWNS ANOTHER
 # wine process (and another Dock icon) to deliver the message. Just kill.
+#
+# On the limits of argv matching: Wine rewrites a PE process's argv AND its comm
+# to the Windows image name, so a leftover shows up as bare `start.exe` with no
+# path and PPID 1. Nothing below can match that, which is why --deep exists.
+#
+# Why --game-only exists: the full sweep matches `C:\Program Files`, which is the
+# Steam client too, so every iteration of a game bug cost a ~60 s Steam restart.
+# Steam games launch from the shared library drive (S:), so the game can be killed
+# on its own and the client left alone. Use this while iterating on one game.
 
-count() { ps aux | grep -E 'C:\\|steamwebhelper\.exe|wineserver|games/runtimes/wine-1' | grep -v grep | wc -l | tr -d ' '; }
+GAMES_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-echo "wine-side processes before: $(count)"
+MODE="all"
+case "${1:-}" in
+    --game-only) MODE="game" ;;
+    --deep)      MODE="deep" ;;
+    "")          ;;
+    *) echo "usage: killwine [--game-only|--deep]" >&2; exit 2 ;;
+esac
+
+# Games live on S:, the Steam client on C:. That split is what makes --game-only
+# possible, so count them separately.
+count_game() { ps aux | grep -E 'S:\\' | grep -v grep | wc -l | tr -d ' '; }
+count_all()  { ps aux | grep -E 'C:\\|S:\\|steamwebhelper\.exe|wineserver|winedbg|games/runtimes/wine-1' | grep -v grep | wc -l | tr -d ' '; }
+
+if [ "$MODE" = "game" ]; then
+    echo "game processes before: $(count_game)   (leaving Steam client up)"
+    # Everything the game side owns. Nothing here can match C:\Program Files.
+    pkill -9 -f 'S:\\SteamLibrary'  2>/dev/null
+    # Crash handlers spawned by the game we just killed. `winedbg --auto <pid>
+    # <handle>` blocks on its target forever once we SIGKILL it, and its argv
+    # carries no path, so it is invisible to every other match here.
+    pkill -9 -f 'winedbg'           2>/dev/null
+    echo "game processes after:  $(count_game)"
+    steam=$(ps -eo command | grep -c '[s]teamwebhelper\.exe')
+    echo "note: $steam steamwebhelper process(es) left running, as intended"
+    exit 0
+fi
+
+echo "wine-side processes before: $(count_all)"
 
 pkill -9 -f 'steamwebhelper\.exe'      2>/dev/null
 pkill -9 -f 'C:\\Program Files'
@@ -24,9 +62,44 @@ pkill -9 -f 'C:\\Program Files'
 pkill -9 -f 'S:\\SteamLibrary'        2>/dev/null
 pkill -9 -f 'C:\\windows'              2>/dev/null
 pkill -9 -f 'games/runtimes/wine-1'    2>/dev/null
+# Wine spawns `winedbg --auto <pid> <handle>` per crash, and it blocks on the
+# crashing process -- which we then SIGKILL, so the handler waits forever. These
+# were invisible to every match above (argv is just "winedbg --auto 400 112"),
+# and 751 of them had accumulated from a single five-minute crash loop.
+pkill -9 -f 'winedbg'                  2>/dev/null
+# `start.exe /exec ...` from a virtual-desktop experiment, likewise orphaned.
+pkill -9 -f 'start\.exe'               2>/dev/null
 pkill -9 -f 'wineserver'               2>/dev/null
 
-echo "wine-side processes after:  $(count)"
+# --deep: find processes by what they have *mapped* rather than by what they claim
+# to be. Every Wine process maps files under runtimes/ -- the PE builtins, plus
+# apisetschema.dll and the nls tables, verified against a leftover `start.exe`.
+# This is exact, but a full lsof pass costs ~20 s, so it is opt-in.
+#
+# Deliberately keyed on runtimes/ only, NOT on the whole tree. A shell sitting in
+# library/ or prefixes/ has a matching cwd but is not a Wine process, and killing
+# the user's terminal is a much worse failure than missing an orphan. The shell
+# guard below is belt-and-braces for the same reason.
+if [ "$MODE" = "deep" ]; then
+    echo "==> deep sweep (full lsof pass, this takes ~20 s)"
+    found=0
+    for pid in $(lsof -Fpn 2>/dev/null \
+                 | awk -v root="$GAMES_ROOT/runtimes/" \
+                       '/^p/{pid=substr($0,2)} index($0,"n" root)==1{print pid}' \
+                 | sort -u); do
+        [ "$pid" = "$$" ] && continue
+        name=$(ps -o comm= -p "$pid" 2>/dev/null)
+        case "$name" in
+            ""|*/zsh|*/bash|*/sh|zsh|bash|sh|lsof|node|*/node) continue ;;
+        esac
+        echo "    killing $pid ($name)"
+        kill -9 "$pid" 2>/dev/null
+        found=1
+    done
+    [ "$found" = 1 ] || echo "    nothing extra found"
+fi
+
+echo "wine-side processes after:  $(count_all)"
 
 remaining=$(ps aux | grep -iE "/Applications/Steam.app|Application Support/Steam" | grep -v grep | wc -l | tr -d ' ')
 [ "$remaining" -gt 0 ] && echo "note: $remaining native macOS Steam process(es) left running (not ours)"

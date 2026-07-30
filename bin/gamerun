@@ -34,7 +34,18 @@ if [ "$BACKEND" != "none" ]; then
 fi
 
 # Profile-level overrides win over backend defaults; both are merged.
-ALL_OVERRIDES="${BACKEND_OVERRIDES}${WINEDLLOVERRIDES:+;$WINEDLLOVERRIDES}"
+#
+# Join with ';' only when BOTH sides are non-empty. The previous form appended
+# ";$WINEDLLOVERRIDES" unconditionally, so with BACKEND="none" (empty
+# BACKEND_OVERRIDES) the result began with a stray ';' -- and Wine then silently
+# ignored the whole list. That cost a wrong conclusion: a run meant to disable
+# gameoverlayrenderer loaded it anyway, and the override looked like it had been
+# tested when it had not.
+if [ -n "$BACKEND_OVERRIDES" ] && [ -n "$WINEDLLOVERRIDES" ]; then
+    ALL_OVERRIDES="$BACKEND_OVERRIDES;$WINEDLLOVERRIDES"
+else
+    ALL_OVERRIDES="${BACKEND_OVERRIDES}${WINEDLLOVERRIDES}"
+fi
 
 # --- assemble environment -------------------------------------------------
 env_args=(

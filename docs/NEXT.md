@@ -9,32 +9,55 @@ contains conclusions that were later disproved and are marked as such.
 variables. The runtime is reproducible: `bin/build-runtime` builds it from a
 clean checkout and verifies it. Don't re-derive any of that.
 
-**The task is Strategic Command WWII: make it draw.** It launches, spins at
-~100% CPU and shows a black fullscreen window. CrossOver runs the same game from
-the same files in ~30 s, so it is not a hardware or fundamental-compatibility
-question.
+**The task is Strategic Command WWII. It is NOT a graphics problem — root cause
+found 2026-07-30.** The game never gets anywhere near drawing. It dies in
+Wine's 32→64-bit WoW64 transition thunk. Full mechanism in §"The WoW64 mode
+switch" below; the short version:
 
-**Read this before touching graphics backends:** it is an **SDL 1.2 /
-DirectDraw** title, *not* D3D9. `WINEDEBUG=+file` shows the last modules it
-touches are `ddraw.dll` and `opengl32.dll`. Both `wined3d` and DXVK were tried
-and failed *identically*, because neither is in the path. The profile currently
-sets `BACKEND="dxvk-3.0.2"`, which is therefore almost certainly irrelevant —
-consider setting it back to `"none"` as a cleaner baseline.
+> Wine's `wow64cpu.dll!syscall_32to64` is 64-bit code reached from 32-bit code
+> via a CS-changing far call. **In this game that mode switch does not take
+> effect**, so the thunk is executed as 32-bit code. Its first instruction
+> `xchg %r14,%rsp`
+> (`4c 87 f4`) decodes in 32-bit mode as `dec %esp; xchg %esi,%esp`, which
+> trashes ESP; a few instructions later the RIP-relative
+> `mov 0x5ecd(%rip),%edx` decodes as the **absolute** load `mov 0x5ecd,%edx`
+> and faults reading `0x5ECD`. Wine then cannot deliver that exception, because
+> the wrecked ESP points into a read-only image page, so writing the exception
+> frame faults too — and that re-enters the handler. The result is ~50,000
+> page faults and ~375,000 mach traps per second, forever, at 100% CPU.
 
-**First thing to do:** re-run the trace on the current runtime. The earlier
-trace was taken while gnutls was failing to load 25 times per launch, and those
-failures were not necessarily innocent. That is fixed now, and nobody has
-re-measured since.
+**Do not start from the screen.** The black fullscreen window with an hourglass
+is *normal* for the first ~30 s — CrossOver shows exactly the same thing before
+the menu appears. Ours simply never leaves that phase. Nothing about the window
+is diagnostic.
 
-```sh
-bin/killwine
-bin/gamerun steam          # Steam must be up first; see "launch recipes" below
-# then, in another shell, with WINEDEBUG=+file / +wgl,+opengl,+ddraw
-```
+**Why CrossOver survives it — answered.** They carry a Rosetta-specific
+workaround, **`CW HACK 20760`**, in `dlls/wow64cpu/cpu.c`, gated on
+`is_rosetta2()` (CPU brand string contains `VirtualApple`). It replaces the
+mode-switching far **`ljmp`** with a far **`lcall`** on the way in and a far
+**`lretq`** on the way out. Their own comment:
 
-Ask Gil to look at the screen when the game is fullscreen — it takes its own
-macOS Space and `screencapture` will photograph the wrong one. He can send a
-⌘⇧3 screenshot from Desktop.
+> *"When running under Rosetta 2, use lretq instead of ljmp to work around a
+> SIGUSR1 race condition."*
+
+The reference implementation is **already on disk** at
+`src/crossover/sources/wine/dlls/wow64cpu/cpu.c`; `diff` it against
+`src/wine/dlls/wow64cpu/cpu.c` (163 lines, and the hack is the only real
+difference in that file). A port to 11.14 was built and **verified to make the
+game reach its main menu**.
+
+⚠️ **The patch is NOT currently applied.** It was deliberately reverted so the
+problem could be used as a clean-context test for several models. To restore it,
+re-port the hack from that diff, register it in `patches/series` as class
+`workaround`, and rebuild only `dlls/wow64cpu`. Confirm with
+`objdump -d runtimes/wine-11.14-x86_64/lib/wine/x86_64-windows/wow64cpu.dll |
+grep -c lretq` — **2** means applied, **0** means not.
+
+⚠️ **An earlier version of this file said "the fix is not in the thunk's code"
+and sent the reader to the caller side. That was wrong**, and it was written
+while the investigation was still open. The divergence is in the thunk, starting
+at `+0x11b0` — only `0x77` bytes past where the comparison stopped. Two lessons
+recorded in "Method note".
 
 ---
 
@@ -48,8 +71,10 @@ next".
 the store — text and all. It needs no environment variables: the runtime carries
 its own libraries (`RUNTIME.md` §1).
 
-**Strategic Command WWII is installed and launches, but renders black.** It is
-the first non-Chromium target, and the first 32-bit one.
+**Strategic Command WWII is installed and launches, and then burns a core
+forever in a Wine WoW64 exception loop.** It is the first non-Chromium target
+and the first 32-bit one. "Renders black" was the old description and is
+misleading — see the handover note above.
 
 Working and verified:
 - `runtimes/wine-11.14-x86_64` — upstream Wine, `--enable-archs=i386,x86_64`,
@@ -63,32 +88,152 @@ Working and verified:
   `compare-bottle`
 - `tools/probes/` — one probe per question, see `RUNTIME.md` §6
 
+## The WoW64 mode switch (Strategic Command root cause)
+
+Measured 2026-07-30. Evidence in `docs/evidence/sc3-*`.
+
+**How to reproduce in one step.** `bin/gamerun strategic-command-direct` runs the
+game exe directly, so the environment is yours and there is no launcher click.
+It needs Steam already up in the same prefix, and it needs
+`steam_appid.txt` — see "the steam_appid.txt file" below.
+
+```sh
+bin/gamerun steam &                                    # wait for login
+WINEDEBUG=+virtual,+pid bin/gamerun strategic-command-direct
+```
+
+**The two log lines that matter**, always byte-identical across runs:
+
+```
+warn:virtual:virtual_setup_exception exception outside of stack limits
+    addr 0x7b591139 stack 0x7b3f0f00 (0x100110000-0x100112000-0x10020fd20)
+warn:virtual:virtual_setup_exception exception outside of stack limits
+    addr 0x4101fd     stack 0x7b3efd50 (0x100110000-0x100112000-0x10020fd20)
+```
+
+`0x7b591139` is `wow64cpu.dll` (loaded at `0x7B590000`, confirm with
+`+loaddll`) `+0x1139`. Disassembling our own runtime's copy:
+
+```
+000000007a401110 <syscall_32to64>:
+    7a401110:  4c 87 f4              xchg %r14,%rsp
+    ...
+    7a401139:  8b 15 cd 5e 00 00     mov 0x5ecd(%rip),%edx   # cs32_sel
+```
+
+The `+seh` record for that fault says `info[0]=0` (read) and
+**`info[1]=0x5ECD`** — the accessed address equals the instruction's
+*displacement*. That only happens if the bytes were decoded in 32-bit mode,
+where `mod=00, rm=101` means absolute disp32 rather than RIP-relative. The same
+bytes both ways:
+
+| bytes | 64-bit (intended) | 32-bit (what ran) |
+| ----- | ----------------- | ----------------- |
+| `4c 87 f4` | `xchg %r14,%rsp` | `dec %esp` + `xchg %esi,%esp` |
+| `8b 15 cd 5e 00 00` | `mov 0x5ecd(%rip),%edx` | `mov 0x5ecd,%edx` |
+
+Corroborating: the faulting context reports `cs=0107` — still the **32-bit**
+code selector — and `ss=0000`. And `esp=0x7b3f0f0a` is misaligned and points
+into a lone 4 KB `rwx` page at `7b3f0000-7b3f1000`, i.e. wreckage from
+`dec %esp; xchg %esi,%esp`, not a stack.
+
+The loop follows from the wrecked ESP: Wine tries to build the exception frame
+there, `0x7b3efd50` and below is the **`r-x`** region under that page, the
+`memmove` write faults (`lldb` shows thread 2 stopped at
+`EXC_BAD_ACCESS code=2 address=0x7b3efc30` inside
+`_platform_memmove$VARIANT$Rosetta`), and that fault re-enters the handler.
+Measured cost: `top` shows FAULTS climbing ~50,000/s and SYSMACH ~375,000/s,
+with 48 s of *system* time against 2 s of user time.
+
+### This is situational, NOT "32-bit is broken"
+
+Important, because it is the obvious wrong conclusion to draw from the above.
+Every 32-bit process reaches `syscall_32to64` for *every* syscall, so a
+universally broken thunk would mean no 32-bit exe could even load a DLL. Two
+32-bit exes from this very game directory run fine on this runtime:
+
+| exe | bitness | result |
+| --- | ------- | ------ |
+| `Launcher.exe` | PE32 (.NET) | runs, draws its window, PLAY works |
+| `Editor-WWII War in Europe.exe` | PE32, same SDL stack | runs, 1.5% CPU, **zero** `virtual_setup_exception` |
+| `SC3-WWII War in Europe.exe` | PE32 | faults as above |
+
+So the mode switch normally succeeds and fails only at this one point. Our Wine
+is not miscompiled and the prefix is not misconfigured — resist "rebuild Wine"
+as the first move.
+
+**Why it fails *here*.** The syscall that crosses the boundary at the fatal
+moment is `eax=0x99` = **`NtFlushInstructionCache`**, issued by Steam's overlay
+immediately after it hot-patches a function entry in `mmdevapi.dll` (the `+virtual`
+trace shows `NtProtectVirtualMemory(0x74595a80, PAGE_EXECUTE_READWRITE)` → write →
+`PAGE_EXECUTE_READ` right before it). Per CodeWeavers, the trigger is a **SIGUSR1
+race**: Wine's server sends SIGUSR1 for thread suspension and system-APC delivery,
+and a signal landing on the far `ljmp` leaves the thread with the new RIP but the
+stale CS. That explains why this process dies and the Editor and .NET launcher do
+not — only this one has `gameoverlayrenderer.dll` and `steamclient.dll` injected,
+both of which call `SuspendThread`/`Get`/`SetThreadContext`.
+
+*Competing hypothesis, unresolved:* the trigger may be **translation-cache
+invalidation** from the immediately preceding code patch, whose re-translation
+loses 64-bit mode — the fault is 4/4 byte-identical and always right after a
+patch+flush, which fits invalidation better than a race. The two are
+indistinguishable from outside the emulator and **the fix is the same either way**.
+A minimal 32-bit program that patches its own code and flushes would settle it.
+
+⚠️ **Retracted reasoning:** an earlier version argued the byte-identical fault
+addresses were evidence *against* a race. That is invalid — `0x7b591139` is fixed
+by construction, since it is always the same instruction at the far-jmp target, no
+matter when the race lands. Determinism says nothing either way here.
+
+### What this rules out
+
+- Graphics. Nothing GL, ddraw, D3D or backend-related is in the path. The
+  previous "SDL 1.2 / DirectDraw, make it draw" framing was wrong.
+- Audio. `SDL_AUDIODRIVER=dummy` changes nothing; the fault is identical.
+- The Steam overlay. It *is* injected and its handlers *are* walked during the
+  unwind, which made it look guilty — but the fault is byte-identical with the
+  overlay disabled in Steam, and an SEH handler being walked says nothing about
+  what caused the fault. Gil disabled the in-game overlay while testing this;
+  it can be turned back on.
+
+### The fix, concretely
+
+Port `CW HACK 20760` from `src/crossover/sources/wine/dlls/wow64cpu/cpu.c` into
+`src/wine/dlls/wow64cpu/cpu.c`. It applies essentially verbatim to 11.14 and needs
+nothing else — upstream 11.14 already implements `SystemProcessorBrandString`
+(`dlls/ntdll/unix/system.c`), which `is_rosetta2()` depends on. Five parts:
+
+1. `struct thunk_32to64_rosetta2_workaround` (lcall + far-return frame), and make
+   the two members of `struct thunk_opcodes` unions of the old and new shapes.
+2. `BOOL use_rosetta2_workaround;` — **non-static**, the asm references it by name
+   — plus `is_rosetta2()`.
+3. `syscall_32to64`: `cmpl`/`jne` around the existing `ljmp`, with an `lretq` path.
+4. `unix_call_32to64`: the same, with a distinct label.
+5. `BTCpuProcessInit`: set the flag and build the `lcall`-based entry thunk.
+
+Then rebuild only `dlls/wow64cpu` and install `wow64cpu.dll`. Because the Wine
+*version* is unchanged, `prefixes/steam-base` is not at risk.
+
+Note the 32→64 half of the change is **invisible to any binary diff** — it is bytes
+poked into `code_buffer` at runtime by `BTCpuProcessInit`, living in `.data`. Only
+the 64→32 `lretq` half is visible in `.text`. That is part of why a static compare
+of the two shipped DLLs looked like "no relevant difference".
+
+`runtimes/wine-cx26.3-x86_64` (already built from their source) contains the
+workaround, so it can smoke-test the diagnosis without a rebuild — but **do not
+point it at `prefixes/steam-base`**; an 11.14 → 11.0 downgrade risks a prefix that
+took hours to provision. Use a throwaway `bin/mkprefix` prefix.
+
 ## Next actions, in order
 
-1. **Strategic Command: find out why it never draws.**
-
-   What is known:
-   - It launches, spins at ~100% CPU indefinitely, shows a black fullscreen
-     window with an hourglass cursor. CrossOver runs the same game, from the
-     same files, reaching the menu in ~30 s.
-   - It **never reaches asset loading** — `lsof` shows only its own DLLs open
-     (`SDL.dll`, `SDL_ttf`, `SDL_image`, `SDL_mixer`, `SDL_gfx`, `steam_api`),
-     with read offsets static across 15 s. No campaign data, no bitmaps.
-   - `WINEDEBUG=+file` shows the last modules it touches are **`ddraw.dll` and
-     `opengl32.dll`** — it is an **SDL 1.2 / DirectDraw** title, *not* D3D9.
-     That is why `wined3d` and DXVK behaved identically: neither was ever in
-     the path. Do not re-test graphics backends without first confirming which
-     API the game actually uses.
-   - `WINEDEBUG=+wgl,+opengl,+ddraw` produced **no GL or ddraw calls at all**,
-     so it stalls before it draws anything.
-
-   Re-run that trace on the current runtime before going further: the earlier
-   trace was taken when gnutls was failing to load 25 times per launch, and
-   those failures were not necessarily innocent. The bundle fixed that.
+1. **Re-apply the wow64cpu fix** (see "The fix, concretely"). It is known-good — a
+   port was built and verified to reach the game's main menu — but it is currently
+   reverted. This is bookkeeping, not investigation.
 
 2. **Then the other two games** — Quasimorph and Battleship Command, both Unity
-   D3D11, so DXMT is the intended backend. They exercise a completely different
-   path from Strategic Command and may well be easier.
+   D3D11, so DXMT is the intended backend. Note they are **64-bit**, so they do
+   not go through the WoW64 thunk at all and are very likely unaffected by the
+   bug above. Worth trying early: they may just work.
 
 3. **Fold prefix provisioning into a fresh prefix.** `bin/mkprefix` now installs
    corefonts, `d3dcompiler_47` and Wine Mono, but it has never been run
@@ -98,14 +243,30 @@ Working and verified:
 ## Known-good launch recipes
 
 ```sh
-bin/gamerun steam                 # client; renders, logs in
-bin/gamerun strategic-command     # launches via steam.exe -applaunch 593030
+bin/gamerun steam                     # client; renders, logs in
+bin/gamerun strategic-command         # via steam.exe -applaunch 593030 (real path)
+bin/gamerun strategic-command-direct  # runs the game exe directly (debug path)
 ```
 
-Steam games must be launched **through Steam**, not by running the game exe:
-`steam_api.dll` re-launches the game via `steam://run/<appid>` and exits 53, and
-that hand-off goes through Wine's URL handler, which does not inherit our
-environment. See `RUNTIME.md` §9.
+### The `steam_appid.txt` file
+
+`library/.../Strategic Command WWII War in Europe/steam_appid.txt` contains
+`593030` and **was added by us**, not by Steam. It is what makes
+`strategic-command-direct` possible: without it `steam_api.dll` calls
+`SteamAPI_RestartAppIfNecessary`, hands the launch back to Steam via
+`steam://run/593030`, and exits — so you get the .NET launcher again instead of
+the game. With it present, `SteamAPI_Init` just connects to the running client.
+
+It is an added file, not a modified one, so it is harmless; `rm` it to get stock
+behaviour back, and note "verify integrity of game files" may remove it.
+
+Correction to `RUNTIME.md` §9: that section reads as "running the game exe
+directly never works, it exits 53". The real rule is narrower — direct launch
+fails **only when Steam is not already running**. With Steam up it still hands
+off unless `steam_appid.txt` is present.
+
+(The blanket "Steam games must be launched through Steam, it exits 53 otherwise"
+rule that used to be repeated here is superseded by the two paragraphs above.)
 
 ## Open questions
 
@@ -128,7 +289,108 @@ traces, call-set diffs against CrossOver. Inferring causes from an
 application's error messages produced a string of confident, wrong theories.
 The refuted list is kept below so they are not chased twice.
 
+**Three additions from the wow64cpu hunt (2026-07-30), because that session
+produced the right mechanism and then the wrong direction:**
+
+1. **`src/` is reference material, not build output.** `.gitignore` lists `/src/`
+   with the artifact directories, which is misleading: it holds
+   `src/wine/`, `src/wine-11.0/` and `src/crossover/sources/wine/`. The answer to
+   this bug was a `diff` of two files already sitting there. `src/` appeared in the
+   first `ls` of the session and was never opened, because the ignore rule had
+   framed it as output. **A `.gitignore` says what not to *commit*, not what is not
+   worth *reading*.** For any "works in CrossOver, not for us" question:
+   `grep -rn 'CW HACK' src/crossover/sources/wine/` enumerates every intentional
+   divergence they carry, and `grep -rl Rosetta src/crossover/sources/wine/`
+   returns six files.
+2. **Match the tool to the question.** A *difference* question ("why does the
+   working reference behave differently?") is answered by diffing the reference.
+   Tracing answers a *behaviour* question ("what is happening?"). This session
+   asked the first and instrumented for the second, and the trace — which was
+   correct and detailed — then anchored attention on the fault site rather than the
+   version delta.
+3. **Do not write conclusions into this file while still investigating.** The
+   "fix is not in the thunk's code" error was committed to the handover mid-hunt,
+   which turned a guess into a stated finding and pointed the next reader away from
+   the answer. Record observations here freely; defer conclusions until the
+   question is actually closed. When stuck, spawn a fresh-context **read-only**
+   investigator instead of writing up a dead end.
+
+## Potential upstream contribution (candidate — NOT pursued)
+
+**`virtual_setup_exception` writes the exception frame onto a stack it has just
+rejected.** In `dlls/ntdll/unix/virtual.c` (~4674-4686 in the 11.14 tree) it
+detects that the target stack is outside the thread's limits, logs
+
+```
+warn:virtual:virtual_setup_exception exception outside of stack limits ...
+```
+
+and then proceeds to return `stack - size` and write there anyway. When the stack
+pointer is genuinely wrecked, that write faults, which re-enters exception
+delivery, which faults again — an unkillable ~100% CPU loop that emits **no
+further output at all**. That is the entire reason this bug presented as a
+"rendering hang" instead of a crash, and it is why it cost days rather than
+minutes.
+
+Calling `abort_thread(1)` here — as the nested-signal-stack case already does —
+or even just promoting the `WARN` to an `ERR`, would turn a silent infinite loop
+into an immediate, obvious diagnosis. Arguably worth more to the next person than
+the Rosetta workaround itself, since it converts a whole class of WoW64 stack
+corruption from "mystery hang" into "named error".
+
+**Status: deliberately not pursued.** Recorded so it is not lost. Nobody has
+written a test case, checked current upstream, or confirmed `abort_thread` is the
+right call there.
+
+## Tooling fixed while doing this (2026-07-30)
+
+- **`bin/killwine` missed most leftovers.** Wine rewrites a PE process's argv
+  *and* its `comm` to the Windows image name and orphans reparent to PID 1, so
+  a leftover shows up as bare `start.exe` with no path — matching nothing.
+  Found **751** stale `winedbg --auto` crash handlers from a single five-minute
+  crash loop on Jul 29, plus four `start.exe /exec explorer /desktop=SC3` from a
+  virtual-desktop experiment, one over a day old. `killwine` reported "0
+  processes" the whole time. Now matches `winedbg` and `start.exe`, and
+  `bin/killwine --deep` sweeps by open files via `lsof` (exact, ~20 s, opt-in).
+  The deep sweep keys on `runtimes/` only and skips shells on purpose — keying
+  it on the whole tree would kill a terminal whose cwd is in `library/`.
+- **`bin/gamerun` silently dropped `WINEDLLOVERRIDES`.** It built
+  `"${BACKEND_OVERRIDES};${WINEDLLOVERRIDES}"` unconditionally, so with
+  `BACKEND="none"` the string began with a stray `;` and Wine ignored the whole
+  list. This actively produced a wrong conclusion: a run intended to disable
+  `gameoverlayrenderer` loaded it anyway, and the override looked tested when it
+  had not been. Now only joins when both sides are non-empty.
+- **`bin/killwine --game-only`** kills only the game (`S:\SteamLibrary` plus
+  orphaned `winedbg`) and leaves the Steam client up. The full sweep matches
+  `C:\Program Files`, which is Steam too, so every iteration used to cost a ~60 s
+  client restart. Measured: relaunch-to-spinning drops from ~60 s to **3 s**. Use
+  it while iterating on one game; use plain `killwine` to tear everything down.
+  Note `WINEDLLOVERRIDES='gameoverlayrenderer='` does **not** stop the overlay —
+  Steam loads it by full path, so that route cannot A/B it.
+
 ## Do not re-chase these (measured and refuted)
+
+- *"Strategic Command is a rendering/black-window problem."* No. It never
+  reaches drawing. It is the WoW64 32→64 mode-switch fault above. The black
+  fullscreen window with hourglass is *identical* to CrossOver's first ~30 s and
+  carries no information.
+- *"The Steam overlay is the **cause**."* No — the cause is the un-worked-around
+  `ljmp`. Byte-identical fault with the in-game overlay disabled. Its SEH handlers
+  appear in the trace only because they are *walked* during the unwind, and its
+  `Unknown opcodes for X86` lines mean it *declined* to hook (and name
+  `SETUPAPI.dll`, nowhere near the crash site). Its log stopping at
+  `Initializing Audio...` is the hang, not the cause.
+  **But do not over-correct to "the overlay is irrelevant" either** — it is the
+  plausible *trigger*: it issues the `NtFlushInstructionCache` that crosses the
+  boundary, and it (with `steamclient.dll`) is the only source of
+  `SuspendThread`/`SetThreadContext` traffic, i.e. of SIGUSR1. Cause and trigger
+  are different things here. (Trigger role: inferred, not measured.)
+- *"It is an audio problem."* No. `SDL_AUDIODRIVER=dummy` changes nothing;
+  `DSOUND`/`mmdevapi` still load and the fault is identical. They load just
+  before the fault, which is timing, not causation.
+- *"Our Wine is built wrong / 32-bit does not work here."* No. `Launcher.exe`
+  and `Editor-WWII War in Europe.exe` are both 32-bit and both run on this
+  runtime, and both use the same thunk for every syscall.
 
 - *"The dlopen failures are Wine bugs to fix upstream."* No — Wine dlopens by
   soname by design and macOS lacks `/etc/ld.so.conf.d/`. Five sites of one

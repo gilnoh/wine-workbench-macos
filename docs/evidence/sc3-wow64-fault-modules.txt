@@ -1,0 +1,79 @@
+08c0:08c4:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\start.exe" at 0000000140000000: builtin
+08c0:08c4:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\kernelbase.dll" at 00006FFFFF360000: builtin
+08c0:08c4:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\kernel32.dll" at 00006FFFFF9E0000: builtin
+08c0:08c4:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\msvcrt.dll" at 00006FFFFEE60000: builtin
+08c0:08c4:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\ucrtbase.dll" at 00006FFFFE970000: builtin
+08c0:08c4:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\sechost.dll" at 00006FFFFEDC0000: builtin
+08c0:08c4:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\advapi32.dll" at 00006FFFFF210000: builtin
+08c0:08c4:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\win32u.dll" at 00006FFFFD670000: builtin
+08c0:08c4:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\user32.dll" at 00006FFFFD6D0000: builtin
+08c0:08c4:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\gdi32.dll" at 00006FFFFDD00000: builtin
+08c0:08c4:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\shcore.dll" at 00006FFFFDFE0000: builtin
+08c0:08c4:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\shlwapi.dll" at 00006FFFFE050000: builtin
+08c0:08c4:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\shell32.dll" at 00006FFFFC860000: builtin
+08c0:08c4:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\imm32.dll" at 00006FFFFE4F0000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\wow64.dll" at 00006FFFE6B00000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\wow64cpu.dll" at 000000007B590000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\win32u.dll" at 00006FFFFD670000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\wow64win.dll" at 00006FFFE6990000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"S:\\SteamLibrary\\steamapps\\common\\Strategic Command WWII War in Europe\\SC3-WWII War in Europe.exe" at 00400000: native
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\kernelbase.dll" at 7AE70000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\kernel32.dll" at 7B400000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\msvcrt.dll" at 7A540000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\ucrtbase.dll" at 7A140000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\sechost.dll" at 7A4B0000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\ADVAPI32.DLL" at 7A820000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\win32u.dll" at 79EA0000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\user32.dll" at 7A930000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\GDI32.dll" at 79F00000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\msacm32.dll" at 77030000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\cryptbase.dll" at 788F0000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\rpcrt4.dll" at 78930000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\combase.dll" at 78B80000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\coml2.dll" at 78890000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\ole32.dll" at 78CF0000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\WINMM.DLL" at 770B0000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"S:\\SteamLibrary\\steamapps\\common\\Strategic Command WWII War in Europe\\SDL.dll" at 68100000: native
+08c8:08cc:trace:loaddll:build_module Loaded L"S:\\SteamLibrary\\steamapps\\common\\Strategic Command WWII War in Europe\\MSVCR110.dll" at 76CE0000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"S:\\SteamLibrary\\steamapps\\common\\Strategic Command WWII War in Europe\\SDL_gfx.dll" at 77300000: native
+08c8:08cc:trace:loaddll:build_module Loaded L"S:\\SteamLibrary\\steamapps\\common\\Strategic Command WWII War in Europe\\SDL_ttf.dll" at 10000000: native
+08c8:08cc:trace:loaddll:build_module Loaded L"S:\\SteamLibrary\\steamapps\\common\\Strategic Command WWII War in Europe\\SDL_image.dll" at 62E40000: native
+08c8:08cc:trace:loaddll:build_module Loaded L"S:\\SteamLibrary\\steamapps\\common\\Strategic Command WWII War in Europe\\SDL_mixer.dll" at 00290000: native
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\shcore.dll" at 79030000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\shlwapi.dll" at 79090000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\SHELL32.dll" at 791A0000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"S:\\SteamLibrary\\steamapps\\common\\Strategic Command WWII War in Europe\\steam_api.dll" at 76C90000: native
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\WS2_32.dll" at 784F0000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\imm32.dll" at 77DF0000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\OLEAUT32.dll" at 785A0000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\bcrypt.dll" at 77EE0000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\ncrypt.dll" at 77EA0000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\CRYPT32.dll" at 78100000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\dnsapi.dll" at 756E0000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\nsi.dll" at 756A0000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\IPHLPAPI.DLL" at 75740000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\imagehlp.dll" at 75650000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\PSAPI.DLL" at 77E70000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\VERSION.dll" at 77AB0000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\cfgmgr32.dll" at 774F0000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\SETUPAPI.dll" at 77330000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\Program Files (x86)\\Steam\\tier0_s.dll" at 75590000: native
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\Program Files (x86)\\Steam\\vstdlib_s.dll" at 754E0000: native
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\MSWSOCK.dll" at 754B0000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\Secur32.dll" at 753F0000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\Program Files (x86)\\Steam\\steamclient.dll" at 757E0000: native
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\Kerberos.dll" at 753B0000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\netutils.dll" at 752D0000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\netapi32.dll" at 75300000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\MSV1_0.dll" at 75390000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"c:\\windows\\system32\\winemac.drv" at 75290000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\uxtheme.dll" at 751D0000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\Program Files (x86)\\Steam\\steam.dll" at 750B0000: native
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\DbgHelp.dll" at 74D80000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\Program Files (x86)\\Steam\\CSERHelper.dll" at 74D40000: native
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\Program Files (x86)\\Steam\\gameoverlayrenderer.dll" at 74BB0000: native
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\comctl32.dll" at 747D0000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\DSOUND.DLL" at 74680000: builtin
+08c8:08cc:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\mmdevapi.dll" at 74590000: builtin
+08c8:08cc:warn:virtual:virtual_setup_exception exception outside of stack limits addr 0x7b591139 stack 0x7b3f0f00 (0x100110000-0x100112000-0x10020fd20)
+08c8:08cc:warn:virtual:virtual_setup_exception exception outside of stack limits addr 0x4101fd stack 0x7b3efd50 (0x100110000-0x100112000-0x10020fd20)
