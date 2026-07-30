@@ -56,6 +56,23 @@ Verified with no environment set at all: glyph rasterisation returns a 12x12
 box with 65 non-zero bytes, Vulkan reports 1.4.0, gnutls loads, and Steam's GPU
 topology query returns `k_EGpuDriverId_MoltenVK` with exit code 0.
 
+**Auditing for gaps.** Any `SONAME_*` left as a bare name is only safe if the
+library lives in `/usr/lib`. Check with:
+
+```sh
+grep -E '^#define SONAME_' build/wine-<ver>-x86_64/include/config.h
+env -u DYLD_FALLBACK_LIBRARY_PATH <test-program> libfoo.dylib   # reachable bare?
+```
+
+Currently bundled: vulkan, freetype, gnutls, SDL2 (and MoltenVK, pulled in as a
+dependency). Left bare deliberately: `libcups` (ships in `/usr/lib`), `libodbc`
+(not installed). SDL2 was found this way *after* the first bundling pass —
+Wine uses it for gamepads, so without it controllers silently do not work.
+
+`bin/gamerun` deliberately does **not** set `DYLD_FALLBACK_LIBRARY_PATH`.
+Setting it would mask a bundle regression, and this class of bug is invisible
+when masked: no error, just no Vulkan, or no fonts, or no TLS.
+
 We previously carried five per-site patches hardcoding Homebrew paths. They
 worked, but five sites of one pattern is a policy, not five bugs — they are
 retracted, in `patches/retracted/`. This is also why CrossOver needs no such

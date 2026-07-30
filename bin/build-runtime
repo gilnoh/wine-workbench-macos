@@ -70,10 +70,16 @@ info "bundling host libraries"
 BUNDLE="$PREFIX/lib/bundled"
 
 SEED=""
-for pair in "vulkan:libvulkan.1.dylib" "freetype:libfreetype.6.dylib" "gnutls:libgnutls.30.dylib"; do
+# Seed one cache variable per bundled library. Anything not bundled keeps its
+# bare soname, which is correct only for libraries in /usr/lib (e.g. libcups).
+for pair in "vulkan:libvulkan.1.dylib" "freetype:libfreetype.6.dylib" \
+            "gnutls:libgnutls.30.dylib" "SDL2:libSDL2-2.0.0.dylib"; do
     name="${pair%%:*}"; lib="${pair##*:}"
-    [ -e "$BUNDLE/$lib" ] || die "bundle missing $lib"
-    SEED="$SEED ac_cv_lib_soname_$name=$BUNDLE/$lib"
+    if [ -e "$BUNDLE/$lib" ]; then
+        SEED="$SEED ac_cv_lib_soname_$name=$BUNDLE/$lib"
+    else
+        info "  note: $lib not bundled, $name keeps its bare soname"
+    fi
 done
 info "  seeding configure with absolute sonames from the bundle"
 
@@ -142,7 +148,7 @@ $(tail -5 "$log")"
 # silently: the optional dependencies, and that both architectures are present.
 info "verifying"
 cfg="$BUILD/include/config.h"
-for s in SONAME_LIBVULKAN SONAME_LIBFREETYPE SONAME_LIBGNUTLS; do
+for s in SONAME_LIBVULKAN SONAME_LIBFREETYPE SONAME_LIBGNUTLS SONAME_LIBSDL2; do
     grep -q "define $s" "$cfg" || die "configure did not find $s -- runtime would be degraded"
     # A bare soname here means the seeding did not take, and the runtime would
     # silently lose that library in any process without DYLD_FALLBACK_LIBRARY_PATH.

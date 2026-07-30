@@ -1,5 +1,11 @@
 # games — Wine gaming environment on Apple Silicon
 
+> **Read `RUNTIME.md` for how the runtime behaves today.** This file is the
+> design record and the investigation narrative, kept because the reasoning and
+> the dead ends are worth having. Several conclusions in it were later
+> *disproved* — those are marked inline. Where the two disagree, `RUNTIME.md`
+> wins.
+
 A hand-built Wine environment for running Windows games on macOS, deliberately
 *not* using a wrapper (CrossOver / Sikarugir / Heroic). The goal is twofold:
 play games, and keep every layer open and patchable so fixes can go upstream.
@@ -113,12 +119,19 @@ profile's `ARGS`, which makes CEF rasterise on the CPU. Confirm success via
 **Wine's macOS windows are registered as "wine", not the app name.** Look for
 `wine` in the Dock / Cmd-Tab, not "Steam".
 
-**Homebrew hides the MoltenVK ICD.** It installs the manifest to
+**Homebrew hides the MoltenVK ICD.** ~~It installs the manifest to
 `etc/vulkan/icd.d/`, not the standard `share/vulkan/icd.d/`, so loader
 autodiscovery finds no driver at all. `bin/common.sh` sets `VK_ICD_FILENAMES`
-explicitly. MoltenVK is also flagged `is_portability_driver`, so the loader
-still hides it from apps that don't opt in via `VK_KHR_portability_enumeration`
-— which is why Steam's ANGLE fails even with the ICD configured.
+explicitly.~~
+
+**DISPROVED.** The loader *does* search `/usr/local/etc/vulkan/icd.d` and finds
+MoltenVK; `vulkaninfo` with a clean environment enumerates the GPU. Setting
+`VK_ICD_FILENAMES` was not merely unnecessary, it was **harmful** — pointing it
+at MoltenVK's own manifest is what hides the driver, because that manifest is
+flagged `is_portability_driver` and the loader then withholds it from
+applications that do not request `VK_KHR_portability_enumeration`. Steam does
+not, so it concluded the machine had no GPU. `bin/gamerun` no longer sets it and
+`bin/provision-host` strips the flag. See `RUNTIME.md` §3.
 
 **macOS ships bash 3.2**, where `${#arr[@]}` on a declared-but-empty array trips
 `set -u`. The scripts use `set -eo pipefail` and the `${arr[@]+"${arr[@]}"}` idiom.
@@ -296,16 +309,15 @@ and `logs/webhelper_gpu.txt` says `Disabling GPU acceleration: Disabled/CommandL
 So the fix was never a graphics translation layer. It is getting Chromium into
 software-SwiftShader mode with the GPU work inside the browser process.
 
-**Our working launch line so far:**
+**Our working launch line so far:** ~~`WINEDLLOVERRIDES="d3dcompiler_47=n;vulkan-1=n"`
+plus `-cef-disable-gpu -cef-disable-sandbox`~~
 
-    WINEDLLOVERRIDES="d3dcompiler_47=n;vulkan-1=n"
-    steam.exe -cef-disable-gpu -cef-disable-sandbox
-
-`vulkan-1=n` is essential and non-obvious: SwiftShader loads through CEF's own
-bundled `vulkan-1.dll`, and Wine's builtin winevulkan hijacks that name and then
-offers no usable device. `-cef-disable-gpu` alone leaves SwiftShader unable to
-initialise; `vulkan-1=n` alone lets ANGLE pick D3D11 instead. **Only both
-together** produce `Disabled/CommandLine` + zero graphics errors.
+**SUPERSEDED.** `vulkan-1=n` was actively harmful: it broke Steam's GPU topology
+query, which is what pushed the client onto a doomed GPU process to begin with.
+The client now needs no overrides at all — `bin/gamerun steam` is the whole
+recipe. What it does need is `--in-process-gpu`, injected through Wine because
+Chromium's compositor blits across a process boundary that Wine's per-process
+window surfaces discard. See `RUNTIME.md` §2.
 
 That combination now reproduces every flag CrossOver has **except one**:
 

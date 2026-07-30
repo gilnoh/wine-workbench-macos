@@ -40,11 +40,16 @@ esac
 # The libraries Wine dlopens by soname that we actually care about. Add to this
 # list when a new silent failure turns up -- and note that finding one is the
 # symptom of this whole class, not a one-off.
+# Libraries Wine dlopens by soname that do NOT live in /usr/lib. Check a new one
+# with:  env -u DYLD_FALLBACK_LIBRARY_PATH <test> libfoo.dylib
+# If dyld cannot find it bare, it belongs here. (libcups is deliberately absent:
+# macOS ships it in /usr/lib and the dyld cache, so bare resolves fine.)
 WANT=(
     "$BREW/opt/molten-vk/lib/libMoltenVK.dylib"
     "$BREW/lib/libvulkan.1.dylib"
     "$BREW/opt/freetype/lib/libfreetype.6.dylib"
     "$BREW/opt/gnutls/lib/libgnutls.30.dylib"
+    "$BREW/lib/libSDL2-2.0.0.dylib"        # gamepads; silently no controllers without it
 )
 
 mkdir -p "$DEST"
@@ -57,8 +62,18 @@ deps_of() {
 }
 
 declare -a queue=()
+present=()
 for l in "${WANT[@]}"; do
-    [ -e "$l" ] || die "missing: $l  (run bin/provision-host)"
+    if [ ! -e "$l" ]; then
+        info "  skipping (not installed): $(basename "$l")"
+        continue
+    fi
+    present+=("$l")
+done
+WANT=(${present[@]+"${present[@]}"})
+[ ${#WANT[@]} -gt 0 ] || die "nothing to bundle (run bin/provision-host)"
+
+for l in "${WANT[@]}"; do
     queue+=("$(readlink -f "$l" 2>/dev/null || python3 -c "import os,sys;print(os.path.realpath(sys.argv[1]))" "$l")")
 done
 

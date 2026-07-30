@@ -40,8 +40,18 @@ ALL_OVERRIDES="${BACKEND_OVERRIDES}${WINEDLLOVERRIDES:+;$WINEDLLOVERRIDES}"
 env_args=(
     WINEPREFIX="$PREFIX_PATH"
     PATH="$BIN:$PATH"
-    DYLD_FALLBACK_LIBRARY_PATH="$(runtime_dyld_path "$RUNTIME"):${DYLD_FALLBACK_LIBRARY_PATH:-/usr/lib}"
 )
+# Deliberately NOT setting DYLD_FALLBACK_LIBRARY_PATH.
+#
+# The runtime carries its own copies of the libraries Wine dlopens, and
+# configure was seeded with absolute paths into that bundle, so nothing needs
+# the variable (bin/bundle-libs, docs/RUNTIME.md §1).
+#
+# Setting it anyway would be worse than useless: it would *mask* a bundle
+# regression, and this whole class of bug is invisible when it is masked --
+# a missing library produces no error, just no Vulkan, or no fonts, or no TLS.
+# Leaving it unset means a regression fails loudly and immediately.
+
 # Chromium's software compositor runs in the viz process and blits into a window
 # owned by the browser process; Wine's window surfaces are per-process, so those
 # pixels are dropped and the window is black. --in-process-gpu makes viz a thread
