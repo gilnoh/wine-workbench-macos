@@ -1,58 +1,147 @@
 #!/bin/bash
 # Build a Wine runtime from source with our patches applied.
 #
-#   bin/build-runtime [--version 11.14] [--jobs 8] [--with-debug] [--keep-going]
+#   bin/build-runtime --winecx 26.3.0 [--jobs 8] [--with-debug] [--force]
+#   bin/build-runtime [--version 11.14] [--jobs 8] [--with-debug] [--force]
 #
-# Produces runtimes/wine-<version>-x86_64 from src/wine-<version>, building in
-# build/wine-<version>-x86_64. Existing runtimes are left alone unless --force.
+# Two modes:
 #
-# Why this script exists rather than a page of instructions: three of the traps
+#   --winecx <cxver>   CodeWeavers' published CrossOver Wine ("WineCX"). Source
+#                      is src/crossover/sources/wine (their layout is
+#                      sources/wine, not wine/); output is
+#                      runtimes/winecx-<cxver>-x86_64. THIS IS THE PROJECT'S
+#                      BASE -- see docs/NEXT.md, "The pivot".
+#   --version <wver>   upstream Wine from src/wine-<wver> (or src/wine when it is
+#                      checked out at that tag). Kept for the older runtimes.
+#
+# The output directory name cannot carry three facts -- CrossOver version, Wine
+# version and which tarball it came from -- so every runtime gets a PROVENANCE
+# file, written and asserted here rather than inferred from a folder name later.
+#
+# Why this script exists rather than a page of instructions: most of the traps
 # below are silent. They do not fail the build, they produce a runtime that is
-# subtly wrong -- missing gnutls, or mixing architectures -- and you find out
-# hours later. See docs/RUNTIME.md.
+# subtly wrong -- missing gnutls, mixing architectures, or built from source that
+# was never actually patched -- and you find out hours later. See docs/RUNTIME.md.
 set -uo pipefail
 
 source "$(dirname "$0")/common.sh"
 
+MODE=upstream
 VERSION=11.14
+CXVER=""
+SRC_OVERRIDE=""
+NAME_OVERRIDE=""
 JOBS=8
 WITH_DEBUG=0
 FORCE=0
+ALLOW_CX_MISMATCH=0
 while [ $# -gt 0 ]; do
     case "$1" in
+        --winecx)  MODE=winecx; CXVER="$2"; shift 2 ;;
         --version) VERSION="$2"; shift 2 ;;
+        --src)     SRC_OVERRIDE="$2"; shift 2 ;;
+        --name)    NAME_OVERRIDE="$2"; shift 2 ;;
         --jobs)    JOBS="$2"; shift 2 ;;
         --with-debug) WITH_DEBUG=1; shift ;;     # also apply class 'debug' patches
         --force)   FORCE=1; shift ;;
+        --allow-cx-mismatch) ALLOW_CX_MISMATCH=1; shift ;;
         *) die "unknown option: $1" ;;
     esac
 done
 
-BUILD="$GAMES_ROOT/build/wine-$VERSION-x86_64"
-PREFIX="$GAMES_ROOT/runtimes/wine-$VERSION-x86_64"
 SERIES="$GAMES_ROOT/patches/series"
+[ -f "$SERIES" ] || die "no patch series at $SERIES"
 
-# Prefer a version-named tree; fall back to src/wine when it is checked out at
-# the requested version, which is how this repo has been laid out so far.
-SRC="$GAMES_ROOT/src/wine-$VERSION"
-if [ ! -d "$SRC" ]; then
-    alt="$GAMES_ROOT/src/wine"
-    if [ -d "$alt" ] && [ "$(git -C "$alt" describe --tags 2>/dev/null)" = "wine-$VERSION" ]; then
-        SRC="$alt"
-        info "using $alt (checked out at wine-$VERSION)"
-    else
-        die "no source tree for wine-$VERSION
+# --- resolve source tree and runtime name ---------------------------------
+TARBALL=""
+if [ "$MODE" = winecx ]; then
+    NAME="winecx-$CXVER-x86_64"
+    SRC="${WINECX_SRC:-$GAMES_ROOT/src/crossover/sources/wine}"
+    TARBALL="$GAMES_ROOT/src/crossover/crossover-sources-$CXVER.tar.gz"
+    [ -d "$SRC" ] || die "no WineCX source tree at $SRC
+  Get it with:
+    cd src/crossover
+    curl -O https://media.codeweavers.com/pub/crossover/source/crossover-sources-$CXVER.tar.gz
+    tar xzf crossover-sources-$CXVER.tar.gz      # -> sources/wine"
+
+    # The hard rule (docs/NEXT.md): the source version must equal the installed
+    # CrossOver version, because every real finding in this project came from
+    # A/B-ing against a working CrossOver bottle. A mismatch makes that reference
+    # lie, so it stops the build rather than being noted in passing.
+    plist=/Applications/CrossOver.app/Contents/Info.plist
+    CX_INSTALLED=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist" 2>/dev/null)
+    CX_INSTALLED="${CX_INSTALLED:-none}"
+    case "$CX_INSTALLED" in
+        "$CXVER"*) : ;;                          # 26.3.0.39794 matches 26.3.0
+        *) if [ "$ALLOW_CX_MISMATCH" = 1 ]; then
+               info "WARNING: installed CrossOver is $CX_INSTALLED, source is $CXVER"
+               info "         the bottle reference will not match this runtime"
+           else
+               die "installed CrossOver ($CX_INSTALLED) does not match --winecx $CXVER
+  The A/B reference against a CrossOver bottle only means anything when the two
+  agree; see docs/NEXT.md, 'The pivot'. Upgrade one of them, or pass
+  --allow-cx-mismatch to build anyway (it is recorded in PROVENANCE)."
+           fi ;;
+    esac
+else
+    NAME="wine-$VERSION-x86_64"
+    CX_INSTALLED=""
+    # Prefer a version-named tree; fall back to src/wine when it is checked out at
+    # the requested version, which is how this repo has been laid out so far.
+    SRC="$GAMES_ROOT/src/wine-$VERSION"
+    if [ ! -d "$SRC" ]; then
+        alt="$GAMES_ROOT/src/wine"
+        if [ -d "$alt" ] && [ "$(git -C "$alt" describe --tags 2>/dev/null)" = "wine-$VERSION" ]; then
+            SRC="$alt"
+            info "using $alt (checked out at wine-$VERSION)"
+        else
+            die "no source tree for wine-$VERSION
   Looked for: $SRC
           and: $alt (checked out at wine-$VERSION)
   Get one with:
     git clone --depth 1 -b wine-$VERSION https://gitlab.winehq.org/wine/wine.git src/wine-$VERSION"
+        fi
     fi
 fi
-[ -f "$SERIES" ] || die "no patch series at $SERIES"
+[ -n "$SRC_OVERRIDE" ] && SRC="$SRC_OVERRIDE"
+[ -n "$NAME_OVERRIDE" ] && NAME="$NAME_OVERRIDE"
+
+BUILD="$GAMES_ROOT/build/$NAME"
+PREFIX="$GAMES_ROOT/runtimes/$NAME"
 
 if [ -e "$PREFIX" ] && [ "$FORCE" = 0 ]; then
-    die "runtime already exists: $PREFIX  (use --force to rebuild over it)"
+    die "runtime already exists: $PREFIX  (use --force to rebuild over it)
+  Note a *failed* build also leaves the directory behind, because the library
+  bundle has to be in place before configure runs -- so --force is normal here."
 fi
+# bundle-libs installs into $PREFIX/lib/bundled and configure is seeded with
+# those absolute paths, so the prefix must exist before either runs. `make
+# install` fills in the rest and leaves lib/bundled alone.
+mkdir -p "$PREFIX" || die "cannot create $PREFIX"
+
+# --- source tree must be a git repo AT ITS ROOT ---------------------------
+# Not cosmetic. The patch loop below uses `git -C "$SRC" apply`. When $SRC is a
+# plain directory inside another repo -- which is exactly what an extracted
+# CrossOver tarball is, sitting in the gitignored src/ of this repo -- git
+# resolves upwards to the OUTER repo, prepends the path prefix, finds that the
+# patch's `dlls/...` paths do not start with it, and prints
+#
+#   Skipped patch 'dlls/wow64cpu/cpu.c'.
+#
+# while exiting 0. Every patch then reports as applied and NOTHING is patched.
+# So require the tree to be its own repo, which also gives `git status` to prove
+# the tree is clean and `git checkout .` to reset it.
+git -C "$SRC" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+    || die "$SRC is not a git repository
+  Patch application would silently do nothing (see the comment above this check).
+  Fix with:
+    cd $SRC && git init -b vendor . && git add -A && git commit -m 'pristine'"
+src_prefix=$(git -C "$SRC" rev-parse --show-prefix 2>/dev/null)
+[ -z "$src_prefix" ] \
+    || die "$SRC is not the ROOT of its git repository (prefix: $src_prefix)
+  git apply would skip every hunk and still exit 0, producing an unpatched
+  runtime that looks patched. Give the source tree its own repository:
+    cd $SRC && git init -b vendor . && git add -A && git commit -m 'pristine'"
 
 # --- host sanity ----------------------------------------------------------
 # A missing dependency here shows up as a *silently degraded* runtime, not as a
@@ -65,8 +154,12 @@ fi
 # equivalent and dyld will not find Homebrew. Bundle them and seed configure's
 # soname cache with absolute paths into the bundle, so no source patch and no
 # environment variable is involved. See docs/RUNTIME.md.
+#
+# NOTE this does NOT come free from a CrossOver base: their build bundles its own
+# way, so a WineCX runtime built with plain flags has bare sonames and silently
+# loses freetype, vulkan and gnutls. It is the one genuinely original thing here.
 info "bundling host libraries"
-"$GAMES_ROOT/bin/bundle-libs" "wine-$VERSION-x86_64" >/dev/null || die "bundle-libs failed"
+"$GAMES_ROOT/bin/bundle-libs" "$NAME" >/dev/null || die "bundle-libs failed"
 BUNDLE="$PREFIX/lib/bundled"
 
 SEED=""
@@ -84,8 +177,13 @@ done
 info "  seeding configure with absolute sonames from the bundle"
 
 # --- patches --------------------------------------------------------------
+# On a WineCX base, `patches/series` should hold only OUR deltas. A patch that is
+# a port of a CW HACK will fail here because the hack is already in the base --
+# that failure is the point, and the fix is to delete the patch, not to re-port it.
 info "applying patches from $(basename "$SERIES")"
 applied=0 skipped=0
+PATCHED_FILES=""
+APPLIED_LIST=""
 while read -r class patch; do
     case "${class:-}" in ''|\#*) continue ;; esac
     case "$patch" in dxmt-*) continue ;; esac          # DXMT builds separately
@@ -103,16 +201,41 @@ while read -r class patch; do
         info "  ok    $patch (already applied)"
         applied=$((applied+1))
     else
-        die "patch does not apply and is not already applied: $patch"
+        die "patch does not apply and is not already applied: $patch
+  On a WineCX base this usually means the base already carries the change (if the
+  patch is a port of a CW/CX HACK, delete it) or the base moved under it."
     fi
+    APPLIED_LIST="$APPLIED_LIST $patch"
+    # --numstat only parses the patch, so it works whether or not it applied
+    # here; the third field is the path.
+    PATCHED_FILES="$PATCHED_FILES $(git -C "$SRC" apply --numstat "$p" 2>/dev/null | awk '{print $3}')"
 done < "$SERIES"
 info "patches: $applied applied, $skipped skipped"
+
+# The tree must now differ from its last commit ONLY by the patches we applied.
+# This is what the old script could not check: an earlier session had applied
+# CW Hack 24834 directly in src/wine with no patch file, so build-runtime
+# silently dropped it on every clean rebuild, and wine-0005 (class debug) sat
+# applied in the tree making its skip meaningless.
+stray=""
+while read -r st f; do
+    [ -n "$f" ] || continue
+    case " $PATCHED_FILES " in *" $f "*) continue ;; esac
+    stray="$stray $f"
+done < <(git -C "$SRC" status --porcelain)
+[ -z "$stray" ] || die "source tree has modifications that no patch in the series accounts for:$stray
+  Those changes would be built in but would NOT survive a clean rebuild, so the
+  runtime would not be reproducible. Either write them up as a patch and add
+  them to $SERIES, or discard them:
+    git -C $SRC checkout --$stray"
+info "  tree differs from $(git -C "$SRC" describe --tags --always 2>/dev/null) only by the series"
 
 # --- build ----------------------------------------------------------------
 # Everything below must run in an x86_64 shell AND with CC forced, including
 # for configure. Plain `gcc` under `arch -x86_64` still targets arm64 here, and
 # configure's link tests then fail against the x86_64 Homebrew libraries --
 # silently dropping gnutls, freetype and vulkan from the resulting runtime.
+CONFIGURE_ARGS="--build=x86_64-apple-darwin --enable-archs=i386,x86_64 --prefix=$PREFIX --disable-tests --with-vulkan --with-mingw --with-freetype --with-gnutls --without-x"
 build_script="$(mktemp)"
 trap 'rm -f "$build_script"' EXIT
 cat > "$build_script" <<EOF
@@ -124,11 +247,7 @@ export CXX="g++ -arch x86_64"
 mkdir -p "$BUILD"
 cd "$BUILD"
 if [ ! -f Makefile ]; then
-  "$SRC/configure" $SEED \\
-    --build=x86_64-apple-darwin \\
-    --enable-archs=i386,x86_64 \\
-    --prefix="$PREFIX" \\
-    --disable-tests --with-vulkan --with-mingw --with-freetype --with-gnutls --without-x
+  "$SRC/configure" $SEED $CONFIGURE_ARGS
 fi
 make CC="gcc -arch x86_64" -j$JOBS
 make install
@@ -136,8 +255,8 @@ echo BUILD_OK
 EOF
 chmod +x "$build_script"
 
-info "building wine-$VERSION (jobs=$JOBS) -- this takes a while"
-log="$GAMES_ROOT/build/wine-$VERSION-build.log"
+info "building $NAME (jobs=$JOBS) -- this takes a while"
+log="$GAMES_ROOT/build/$NAME-build.log"
 arch -x86_64 /bin/zsh "$build_script" > "$log" 2>&1
 grep -q BUILD_OK "$log" || die "build failed -- see $log
   last lines:
@@ -158,10 +277,50 @@ info "  sonames are absolute paths into the bundle"
 for a in x86_64-windows i386-windows x86_64-unix; do
     [ -d "$PREFIX/lib/wine/$a" ] || die "missing arch dir: $a"
 done
-ver=$(DYLD_FALLBACK_LIBRARY_PATH="$(runtime_dyld_path "wine-$VERSION-x86_64"):/usr/lib" \
+ver=$(DYLD_FALLBACK_LIBRARY_PATH="$(runtime_dyld_path "$NAME"):/usr/lib" \
       WINEDEBUG=-all "$PREFIX/bin/wine" --version 2>/dev/null)
 info "  version:   $ver"
 info "  32-bit builtins: $(ls "$PREFIX/lib/wine/i386-windows" | wc -l | tr -d ' ')"
 info "  deps:      vulkan freetype gnutls all found"
+
+# --- provenance -----------------------------------------------------------
+# A directory name cannot carry three facts (CrossOver version, Wine version,
+# which tarball), and we already got that wrong once with wine-cx26.3-x86_64.
+# Written here and asserted below, so provenance is checkable rather than
+# inferred.
+wine_version=$(sed -n 's/^Wine version //p' "$SRC/VERSION" 2>/dev/null)
+sha=""
+if [ -n "$TARBALL" ] && [ -f "$TARBALL" ]; then
+    sha=$(shasum -a 256 "$TARBALL" | awk '{print $1}')
+fi
+{
+    echo "runtime:           $NAME"
+    [ "$MODE" = winecx ] && echo "crossover_version: $CXVER"
+    echo "wine_version:      ${wine_version:-unknown}"
+    echo "wine_reported:     ${ver:-unknown}"
+    if [ "$MODE" = winecx ]; then
+        echo "source_tarball:    $(basename "${TARBALL:-unknown}")"
+        echo "sha256:            ${sha:-unavailable (tarball not on disk)}"
+        echo "crossover_app_at_build: ${CX_INSTALLED:-none}"
+    fi
+    echo "source_tree:       ${SRC#$GAMES_ROOT/}"
+    echo "source_commit:     $(git -C "$SRC" rev-parse HEAD 2>/dev/null)"
+    echo "source_base:       $(git -C "$SRC" describe --tags --always 2>/dev/null)"
+    echo "patches:          ${APPLIED_LIST:- none}"
+    echo "configure:         $CONFIGURE_ARGS"
+    echo "built:             $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    echo "built_by:          bin/build-runtime"
+} > "$PREFIX/PROVENANCE"
+
+# Assert it, so a half-written PROVENANCE cannot ship.
+for field in wine_version source_commit built; do
+    grep -qE "^$field: +\S" "$PREFIX/PROVENANCE" \
+        || die "PROVENANCE is missing $field -- refusing to leave an unlabelled runtime"
+done
+if [ "$MODE" = winecx ]; then
+    grep -qE "^crossover_version: +$CXVER\$" "$PREFIX/PROVENANCE" \
+        || die "PROVENANCE does not record crossover_version=$CXVER"
+fi
+info "  PROVENANCE written and asserted"
 
 info "runtime ready: $PREFIX"

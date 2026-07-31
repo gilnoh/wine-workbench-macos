@@ -18,13 +18,29 @@ RUNTIME="${1:-$DEFAULT_RUNTIME}"
 SHARE="$RUNTIMES_DIR/$RUNTIME/share/wine"
 [ -d "$RUNTIMES_DIR/$RUNTIME" ] || die "no such runtime: $RUNTIME"
 
-# The addons header lives in whichever source tree built this runtime.
+# The addons header lives in whichever source tree built this runtime, and it
+# must be THAT tree: Wine refuses an MSI whose version it did not ask for, and
+# the versions differ between bases -- upstream 11.14 wants mono 11.2.0 while
+# WineCX 26.3.0 (Wine 11.0) wants 10.4.1. Guessing from the runtime name used to
+# pick src/wine for everything, which would have handed the WineCX runtime an
+# MSI it rejects -- i.e. no .NET, i.e. a game's launcher exiting 255 in silence.
+# So read the tree out of the runtime's own PROVENANCE first.
 addons=""
-for c in "$GAMES_ROOT/src/wine/dlls/appwiz.cpl/addons.c" \
-         "$GAMES_ROOT/src/wine-${RUNTIME#wine-}/dlls/appwiz.cpl/addons.c"; do
-    [ -f "$c" ] && { addons="$c"; break; }
-done
+prov="$RUNTIMES_DIR/$RUNTIME/PROVENANCE"
+if [ -f "$prov" ]; then
+    tree=$(sed -n 's/^source_tree: *//p' "$prov")
+    [ -n "$tree" ] && [ -f "$GAMES_ROOT/$tree/dlls/appwiz.cpl/addons.c" ] \
+        && addons="$GAMES_ROOT/$tree/dlls/appwiz.cpl/addons.c"
+fi
+if [ -z "$addons" ]; then
+    for c in "$GAMES_ROOT/src/wine-${RUNTIME#wine-}/dlls/appwiz.cpl/addons.c" \
+             "$GAMES_ROOT/src/wine/dlls/appwiz.cpl/addons.c"; do
+        [ -f "$c" ] && { addons="$c"; break; }
+    done
+    [ -n "$addons" ] && info "no PROVENANCE for $RUNTIME -- guessing source tree: ${addons#$GAMES_ROOT/}"
+fi
 [ -n "$addons" ] || die "cannot find appwiz.cpl/addons.c to read the expected versions"
+info "reading addon versions from ${addons#$GAMES_ROOT/}"
 
 MONO=$(grep -m1 '#define MONO_VERSION' "$addons" | tr -d '"' | awk '{print $3}')
 GECKO=$(grep -m1 '#define GECKO_VERSION' "$addons" | tr -d '"' | awk '{print $3}')

@@ -1,39 +1,29 @@
-# Patches applied to the Wine tree, and what each one is.
+# Our deltas on top of the base, and what each one is.
+#
+# THE BASE IS WineCX 26.3.0 -- CodeWeavers' published CrossOver Wine source, in
+# src/crossover/sources/wine at tag winecx-26.3.0. Not upstream Wine.
 #
 #   fix        upstreamable; the goal is to send it away and delete it here
-#   workaround ours to carry until upstream changes
-#   debug      diagnostic only; NOT applied by default
+#   workaround ours to carry until the base changes
+#   debug      diagnostic only; NOT applied by default (build-runtime --with-debug)
+#
+# A patch here that ports a `CW HACK` is a smell: it means we are re-deriving
+# something the base already carries, which is the whole thing the pivot was
+# meant to stop. Take it from the base instead. Four patches left for exactly
+# that reason -- see patches/superseded/README.md. Earlier dlopen/soname patches
+# were wrong rather than superseded -- see patches/retracted/README.md.
 #
 # class       patch
-# The dlopen/soname patches that used to live here are retracted -- see
-# patches/retracted/README.md. bin/bundle-libs plus soname seeding in
-# bin/build-runtime replaces all of them.
+# MEASURED 2026-07-31, and this is why it is back: the pivot test says CrossOver's
+# CX HACK 23950 does NOT replace this. On winecx-26.3.0 with no injection, Steam's
+# window is black, the 23950 shm-surface path never fires for CEF windows (zero
+# shm_surface traces across 78 wine pids on +win, in a log that does contain
+# CefBrowserWindow and Chrome_WidgetWin_0/1), and CrossOver never modified
+# winemac.drv/surface.c -- the `/* use default surface */` line that drops
+# cross-process blits is byte-identical to upstream. 23950 keys on a foreign
+# *parent*; our bug is a foreign *painter*. See docs/RUNTIME.md section 2.
 workaround    wine-0004-kernelbase-append-args-env.patch
 debug         wine-0005-winemac-surface-flush-trace.patch
-# Rosetta 2 loses the CS change on the WoW64 far ljmp, so 32-bit PE processes die
-# in an unrecoverable exception-delivery loop. Ported from CrossOver's CW HACK
-# 20760; gated on the VirtualApple brand string, so inert on real x86_64.
-# Without this, NO 32-bit game can be relied on. See docs/NEXT.md.
-workaround    wine-0006-wow64cpu-rosetta2-mode-switch.patch
-# Synchronous WM_NCPAINT blocked the painting thread, making 2D/GDI menus take
-# 5-10 s per hover. Ported from CrossOver's CW Hack 20969/23427. The paired
-# WM_ERASEBKGND bound (23394) is carried too, but measured ZERO hits -- it is a
-# diagnostic, not the fix. See docs/NEXT.md.
-workaround    wine-0007-win32u-async-ncpaint.patch
-# CW Hack 24834 port, extracted from src/wine where an earlier session had applied
-# it with no patch file at all -- so build-runtime silently dropped it. Inert
-# unless WINEMAC_FWD_COMPAT_GL_CTX=1.
-workaround    wine-0008-winemac-forward-compat-gl-context.patch
-
-# NOTE (2026-07-30): 0006, 0007 and 0008 are all ports of CrossOver hacks, and
-# 0004 is a workaround for something CrossOver fixes properly (CX HACK 23950).
-# All four become redundant once the tree is rebased onto CrossOver's Wine --
-# see docs/NEXT.md, "The pivot". They are kept until that rebase lands so the
-# game keeps working in the meantime.
-#
-# 0005 is class `debug`, so build-runtime skips it -- but it is ALREADY APPLIED in
-# src/wine, which makes the skip meaningless and ships trace code in the surface
-# flush path. Revert it in src/wine, or reclassify it. Not yet decided.
 
 # DXMT (built separately, see backends/)
 fix           dxmt-0001-include-iomanip.patch

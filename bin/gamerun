@@ -93,7 +93,9 @@ case "${1:-}" in
         exec env "${env_args[@]}" zsh
         ;;
     --winecfg)
-        exec env "${env_args[@]}" "$BIN/winecfg"
+        # `wine winecfg`, not $BIN/winecfg: a WineCX runtime has no bin/ app
+        # loaders at all (see bin/mkprefix for why). This form works on both bases.
+        exec env "${env_args[@]}" "$BIN/wine" winecfg
         ;;
 esac
 

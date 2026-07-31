@@ -69,6 +69,38 @@ dependency). Left bare deliberately: `libcups` (ships in `/usr/lib`), `libodbc`
 (not installed). SDL2 was found this way *after* the first bundling pass —
 Wine uses it for gamepads, so without it controllers silently do not work.
 
+### ⚠️ The one place bundling makes things worse: SDL2
+
+**Measured 2026-07-31, on both `wine-11.14-x86_64` and `winecx-26.3.0-x86_64`.**
+Bundling SDL2 does not currently buy working gamepads — it buys a crash:
+
+```
+30  winebus.so   sdl_bus_init + 76
+29  dyld         dlopen_from  ->  runInitializers / forEachInitializer
+    *** NSInternalInconsistencyException: NSWindow should only be instantiated
+        on the main thread!
+    libc++abi: terminating due to uncaught exception of type NSException
+```
+
+`winebus` dlopens `libSDL2` from a worker thread; SDL2's dyld initializer touches
+`NSWindow`, and macOS 26 makes that a hard exception instead of a warning. The
+`winebus` service therefore dies at startup —
+`Auto-start service L"winebus" failed to start: 1053` — so controllers do not work
+*and* every prefix bring-up logs a crash that looks alarming and is unrelated to
+whatever is being debugged at the time.
+
+Not yet fixed, and there is a real choice to make:
+- **drop SDL2 from the bundle** — honest, since gamepads do not work either way, and
+  it removes a confusing crash from every log; or
+- **keep it and make the dlopen safe** — the interesting fix, and the one worth
+  sending somewhere: either `winebus` should initialise the SDL backend on the main
+  thread, or SDL2's Cocoa initialisation should not run at `dlopen` time. This wants
+  a look at which of the two is actually at fault before blaming either.
+
+Do not "fix" it by removing SDL2 from `WANT` without recording which option was
+chosen and why — the reason SDL2 is in that list at all is that its absence was
+itself a silent failure.
+
 `bin/gamerun` deliberately does **not** set `DYLD_FALLBACK_LIBRARY_PATH`.
 Setting it would mask a bundle regression, and this class of bug is invisible
 when masked: no error, just no Vulkan, or no fonts, or no TLS.
@@ -111,25 +143,46 @@ WINE_APPEND_ARGS="steamwebhelper.exe=--no-sandbox --in-process-gpu --disable-gpu
 **This is a workaround, not a fix.** The real fix is cross-process window
 drawing in Wine.
 
-**Update 2026-07-30: CrossOver has already implemented that fix, and it is
-`CX HACK 23950`.** When a window's parent lives in another process, they hand it a
-shared-memory-backed surface instead of Wine's throwaway `dummy_surface`, and
-flush it by sending `WM_WINE_FLUSHSHMSURFACE` to the owning process, which maps
-the section and blits it. In their own words:
+**`CX HACK 23950` is NOT that fix. Tested 2026-07-31 — this section previously
+claimed it was, and that was wrong.**
+
+The hack is real and is in the base: when a window's *parent* lives in another
+process, CrossOver hands it a shared-memory-backed surface instead of Wine's
+throwaway `dummy_surface` and flushes it by sending `WM_WINE_FLUSHSHMSURFACE` to
+the owning process. Scope: `win32u/dce.c`, `win32u/window.c`, `win32u/message.c`,
+`win32u_private.h`, `include/ntuser.h`, `server/window.c`.
 
 ```c
 /* CX HACK 23950: provide a default shm surface for windows with parents in other process */
 ```
 
-Scope: `win32u/dce.c`, `win32u/window.c`, `win32u/message.c`, `win32u_private.h`,
-`include/ntuser.h`, `server/window.c`. Note this section previously called the fix
-"a substantial upstream change" — it is substantial, but it exists and is on disk
-at `src/crossover/sources/wine/`.
+But it does not address Steam, and three measurements say so:
 
-**So `wine-0004` and the whole `WINE_APPEND_ARGS` mechanism should become
-deletable.** The first test after the rebase (see `docs/NEXT.md`, "The pivot") is
-simply: does Steam render on a CrossOver-based runtime with `WINE_APPEND_ARGS`
-unset? Untested so far.
+1. **The pivot test failed.** On `winecx-26.3.0-x86_64` with `wine-0004` absent (so
+   `WINE_APPEND_ARGS` is inert), Steam's client window is **black — no content at
+   all**, confirmed visually.
+2. **The path never runs.** With `WINEDEBUG=+win` and 6 `steamwebhelper.exe`
+   processes alive: **0** `shm_surface`, **0** `FLUSHSHMSURFACE` — in a 3.5 MB log
+   carrying 5,559 `trace:win:` lines from 78 wine pids, and one that *does* contain
+   `CefBrowserWindow` and `Chrome_WidgetWin_0/1`, so the Chromium windows were
+   covered. (Both the control and the window-class check matter: the first version of
+   this measurement had neither, and a bare "0 hits" proves nothing.)
+3. **CrossOver never touched the file that drops the pixels.**
+   `winemac.drv/surface.c` is byte-identical to upstream 11.0 in their tree, and
+   still reads `if (!(data = get_win_data(hwnd))) return TRUE; /* use default
+   surface */`.
+
+The reason is a distinction the earlier grep-based reading missed: 23950 keys on a
+foreign **parent**, while Steam's black window comes from a foreign **painter** —
+the window is owned by the browser process and drawn into by the viz/GPU process.
+Different shapes; only the first is covered.
+
+**So `wine-0004` stays**, now as one of our own deltas rather than a stopgap awaiting
+23950. And the question this section declared closed is **open again**: why does CEF
+run its GPU in-process under CrossOver (their bottle never spawns a
+`--type=gpu-process`) and out-of-process for us? The flag, not the surface, is the
+difference — so reading `libcef.dll` around its `in-process-gpu` string is still the
+honest next step.
 
 A better renderer would **not** help, and this is settled rather than assumed:
 `winemac.drv/opengl.c` carries the same per-process gate and states it outright —

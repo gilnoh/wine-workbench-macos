@@ -13,8 +13,19 @@ to be a launcher — it is a development environment for macOS-specific Wine wor
 
 ## Your goal this session
 
-**Rebase the runtime onto WineCX 26.3.0 (CrossOver's published Wine source), then get
-Steam and Strategic Command WWII running on it.**
+**The WineCX 26.3.0 rebase is DONE (2026-07-31).** Steam renders and logs in,
+Strategic Command plays, and `patches/series` is down to one functional delta of ours.
+The work now is the two things the rebase left behind:
+
+1. **Try `WINEMSYNC=1`** — the working CrossOver bottle sets it, we do not, and msync
+   is opt-in per process *and per wineserver* in this base. Suspect for both open
+   symptoms. There is an `ERR` for a server/client mismatch, so the variable's arrival
+   is verifiable — verify it.
+2. **Audio jitters** noticeably worse than on the old upstream runtime. First genuine
+   regression from the base change.
+
+Then the older open items: the 2 s → 20 s menu fade, the other two games, and the
+SDL2/`winebus` crash.
 
 Read, in this order, and do not re-derive what they already record:
 
@@ -35,8 +46,18 @@ Read, in this order, and do not re-derive what they already record:
 - **Version is 26.3.0, matching the installed CrossOver 26.3.** The source version
   must always equal the installed app version, upgraded together, because A/B-ing
   against a working CrossOver bottle produced *every* real finding so far.
-- Strategic Command's WoW64 crash, its menu latency, and the `--in-process-gpu`
-  question are all **solved or closed**. See NEXT.md.
+- Strategic Command's WoW64 crash and its menu latency are **solved, and now by the
+  base rather than by patches of ours** — both re-verified on WineCX 26.3.0.
+- ⚠️ **The `--in-process-gpu` question is NOT closed — it was reopened on 2026-07-31.**
+  The previous session recorded that `CX HACK 23950` made `wine-0004` unnecessary.
+  Tested: false. Steam is black without `wine-0004` on WineCX, the 23950 path never
+  fires for CEF windows, and CrossOver never modified `winemac.drv/surface.c`. 23950
+  keys on a foreign *parent*; our bug is a foreign *painter*. The open question is
+  again **why CEF runs its GPU in-process under CrossOver** — their bottle spawns no
+  `--type=gpu-process`. See `RUNTIME.md` §2.
+  Worth generalising from: that claim came from grepping their source for a plausible
+  fix and reasoning forward. It read as settled for a day. Grep finds candidates;
+  only running the thing decides.
 
 ## ⚠️ Three traps that will bite you
 
@@ -51,11 +72,14 @@ soname comes out bare. **This is the one genuinely original thing here and the e
 to lose in a base change.** See `RUNTIME.md` §1. Do not "fix" it by setting
 `DYLD_FALLBACK_LIBRARY_PATH` — that masks the regression instead of detecting it.
 
-**2. CrossOver's tree layout differs.** Their source is `sources/wine/`, not `wine/`,
-and their configure flags are their own — do not blindly reuse ours.
-`bin/build-runtime` currently assumes an upstream tree and needs teaching. Read
-[`benstonezhang/winecx_build`](https://github.com/benstonezhang/winecx_build)
-(`build.sh`, `brew_install.sh`) before writing your own recipe.
+**2. CrossOver's tree needs no special configure flags — but its `bin/` is nearly
+empty, and patching it silently no-ops.** Measured: our existing configure line builds
+their tree as-is (`build-runtime --winecx` handles the rest). Two real differences:
+their `TOP_INSTALL_LIB` installs **no app loaders**, so `$BIN/wineboot`, `$BIN/winecfg`
+and `$BIN/msiexec` do not exist — call `wine <tool>` instead; and because an extracted
+tarball is not its own git repo, `git -C "$SRC" apply` resolves up to the outer repo
+and prints `Skipped patch '...'` **while exiting 0**, patching nothing. The source tree
+is a git repo now and `build-runtime` refuses to build otherwise.
 
 **3. `bin/mkprefix` has never been run end to end.** `prefixes/steam-base` predates it
 and was provisioned by hand. A base change is the wrong moment to debug prefix
@@ -112,17 +136,26 @@ bin/compare-bottle Steam <prefix>    # diff the CrossOver bottle against one of 
   `-o` flags in the background and kill it after ~45 s. The attach message alone
   carries the fault address and faulting instruction. `timeout` is not installed.
 
-## Current state (as of 2026-07-31)
+## Current state (end of 2026-07-31)
 
-- Working tree **clean**, 5 commits today, nothing running.
-- The **existing upstream-based runtime works** and is a fallback: Strategic Command
-  launches, reaches its menu with real-time menu response, and plays a turn.
-  `patches/series` has `wine-0004`…`wine-0008`; every `src/wine` modification has a
-  patch file.
-- Known blemish: `wine-0005` is class `debug` (so `build-runtime` skips it) but is
-  applied in `src/wine`, making the skip meaningless. Resolve during the rebase.
-- `runtimes/wine-cx26.3-x86_64` is **misnamed** (built from 26.0.0 source) and has no
-  bundled libs. `src/cx26/` is a 9.1 MB partial extraction — delete it.
+- **Base:** `runtimes/winecx-26.3.0-x86_64`, built from `src/crossover/sources/wine`
+  (now its own git repo: pristine tarball on branch `vendor`, tag `winecx-26.3.0`, our
+  work on `games`). Every runtime carries a `PROVENANCE` file that `build-runtime`
+  writes and asserts.
+- **Prefix:** `prefixes/steam-winecx`, an APFS clone of `steam-base` (4.8 s, zero extra
+  disk) with `wineboot -u` run on it — which keeps the Steam login and the `S:` library
+  registration, the two steps only a human can redo.
+- **`patches/series`:** `wine-0004` (`workaround`, and this base *needs* it) plus
+  `wine-0005` (`debug`). The four CodeWeavers ports are in `patches/superseded/`.
+- **Fallback:** `wine-11.14-x86_64` + `steam-base` still work, untouched, one env var
+  away (`RUNTIME=… PREFIX=… bin/gamerun …`).
+- Fixed on the way through: `get-addons` chose Wine Mono by guessing the source tree
+  (would have handed this base an MSI Wine 11.0 rejects); `mkprefix`/`gamerun` called
+  `$BIN/wineboot`/`$BIN/winecfg`, which **do not exist on a WineCX runtime** — their
+  `TOP_INSTALL_LIB` installs no app loaders. Use `wine <tool>`.
+- `src/cx26/` deleted. `runtimes/wine-cx26.3-x86_64` was **not** misnamed (an earlier
+  note said so; `config.status` proves it came from 26.3.0 source) but has zero bundled
+  libs, so it is unusable and superseded.
 
 ## What "done" looks like
 

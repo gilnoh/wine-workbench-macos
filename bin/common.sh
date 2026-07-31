@@ -72,6 +72,12 @@ load_profile() {
     local name="$1"
     local f="$PROFILES_DIR/$name.env"
     [ -f "$f" ] || die "no profile '$name' (expected $f)"
+    # A RUNTIME/BACKEND from the caller's environment beats the profile, so the
+    # same profile and prefix can be A/B'd across runtimes:
+    #   RUNTIME=wine-11.14-x86_64 bin/gamerun steam
+    # Captured here because the defaults below would otherwise overwrite them
+    # before the profile is even sourced.
+    local env_runtime="${RUNTIME:-}" env_backend="${BACKEND:-}" env_prefix="${PREFIX:-}"
     # Profile defaults; the profile may override any of these.
     RUNTIME="$DEFAULT_RUNTIME"
     BACKEND="none"
@@ -83,5 +89,17 @@ load_profile() {
     PROFILE_ENV=()
     # shellcheck disable=SC1090
     source "$f"
+    [ -n "$env_runtime" ] && RUNTIME="$env_runtime"
+    [ -n "$env_backend" ] && BACKEND="$env_backend"
+    # PREFIX too, but a profile's WORKDIR is written as an absolute path inside
+    # its own prefix, and Steam cares about its cwd -- so move WORKDIR with it
+    # rather than leaving the process running out of the prefix we just left.
+    if [ -n "$env_prefix" ] && [ "$env_prefix" != "$PREFIX" ]; then
+        case "${WORKDIR:-}" in
+            "$PREFIXES_DIR/$PREFIX"/*)
+                WORKDIR="$PREFIXES_DIR/$env_prefix/${WORKDIR#$PREFIXES_DIR/$PREFIX/}" ;;
+        esac
+        PREFIX="$env_prefix"
+    fi
     PREFIX_PATH="$PREFIXES_DIR/$PREFIX"
 }

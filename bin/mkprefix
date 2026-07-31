@@ -34,11 +34,19 @@ mkdir -p "$PREFIX_PATH"
 
 # wineboot initialises the prefix. WINEDLLOVERRIDES silences the mono/gecko
 # installer dialogs -- we install those deliberately later if a game needs them.
+#
+# Invoked as `wine wineboot`, NOT as $BIN/wineboot. Upstream's `make install`
+# drops a copy of the loader into bin/ for each installed program (wineboot,
+# winecfg, msiexec, regedit, ...); **CrossOver's tree deliberately does not** --
+# its TOP_INSTALL_LIB is just "fonts loader/wine.inf nls server/wineserver",
+# because CrossOver launches Windows programs through its own wineloader. So
+# $BIN/wineboot exists on an upstream runtime and is missing on a WineCX one.
+# `wine <tool>` works on both.
 env WINEPREFIX="$PREFIX_PATH" \
     WINEDLLOVERRIDES="mscoree,mshtml=" \
     PATH="$BIN:$PATH" \
     DYLD_FALLBACK_LIBRARY_PATH="$DYLD" \
-    "$BIN/wineboot" --init 2>&1 | grep -viE "^wine: created|fixme:" || true
+    "$BIN/wine" wineboot --init 2>&1 | grep -viE "^wine: created|fixme:" || true
 
 info "waiting for wineserver to settle"
 env WINEPREFIX="$PREFIX_PATH" PATH="$BIN:$PATH" "$BIN/wineserver" -w

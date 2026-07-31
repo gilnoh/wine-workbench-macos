@@ -15,8 +15,15 @@ Wine.** Do not start new work against `src/wine` (upstream 11.14).
 top of WineCX**. If a patch there is a port of a `CW HACK`, that is a smell: it
 means we are re-deriving, and the answer is to take it from the base instead.
 
-**VERSION: WineCX 26.3.0.** Decided 2026-07-31. Gil is renewing the CrossOver
-licence to run **CrossOver 26.3**, so the installed app and our source tree match.
+**VERSION: WineCX 26.3.0.** Decided 2026-07-31, and **the versions now agree**:
+CrossOver.app is `26.3.0.39832`, the source is `crossover-sources-26.3.0.tar.gz`,
+and the `Steam` bottle migrated itself to `26.3.0.39832` when it was opened under
+the new app (`cxbottle.conf` `"Version"`), so the A/B reference is exact.
+
+Stronger than a version match, the source is demonstrably the tree that app was
+built from: the bottle records build timestamp `20260715T103801Z`, and every file
+in `src/crossover/sources/wine` carries mtime `Jul 15 12:37` local — the same
+moment.
 
 **That matching is a hard rule, not a nicety.** The A/B reference against a working
 bottle was decisive **four separate times** in a single session — the `lretq` diff,
@@ -26,13 +33,19 @@ Every real finding came from it. So:
 > **Rule: the WineCX source version must equal the installed CrossOver.app version.**
 > When one is upgraded, upgrade the other in the same change.
 
-Verify they agree with:
+`bin/build-runtime --winecx <ver>` now enforces this: it refuses to build when the
+installed app disagrees (`--allow-cx-mismatch` overrides, and the mismatch is then
+recorded in `PROVENANCE`). Check by hand with:
 
 ```sh
-/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
-  /Applications/CrossOver.app/Contents/Info.plist        # expect 26.3
-cat runtimes/winecx-*/PROVENANCE                          # expect crossover_version: 26.3.0
+/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' \
+  /Applications/CrossOver.app/Contents/Info.plist        # 26.3.0.39832
+cat runtimes/winecx-*/PROVENANCE                          # crossover_version: 26.3.0
+grep '"Version"' ~/Library/Application\ Support/CrossOver/Bottles/Steam/cxbottle.conf
 ```
+
+Use `CFBundleVersion`, not `CFBundleShortVersionString` — the short string is only
+`26.3` and cannot distinguish point releases.
 
 ### Why this base, in one sentence
 
@@ -114,6 +127,17 @@ CXVER=26.3.0   # must equal the installed CrossOver.app version -- see the Rule 
 curl -O "https://media.codeweavers.com/pub/crossover/source/crossover-sources-$CXVER.tar.gz"
 ```
 
+**We already have it** — `src/crossover/crossover-sources-26.3.0.tar.gz`,
+sha256 `ac99c8ca4b3848f3e81784135f023df266b61c2345726ea55a50b3e030dd6872`,
+extracted at `src/crossover/sources/wine` and now a git repository of its own:
+branch `vendor` holds one pristine commit per CrossOver release (tagged
+`winecx-26.3.0`), our work lives on branch `games`. The next CX upgrade is
+therefore *extract onto `vendor`, tag, rebase `games`*.
+
+The tree was verified pristine before committing — every file's size matches the
+tarball's own listing. `src/crossover-sources-26.0.0.tar.gz` is kept only as the
+previous release for cross-version diffing.
+
 ### Ecosystem context — who else does this, and how far behind they are
 
 Worth knowing so we do not assume a community build already solves our problem:
@@ -135,73 +159,239 @@ here rather than re-deriving fixes.
 **Plan: fetch the matching `crossover-sources-<ver>.tar.gz`, commit that tree as the
 base, and keep `patches/series` for our own deltas only.**
 
-### THE REBUILD — start the next session here
+### THE REBUILD — where it actually stands (2026-07-31)
 
 Goal: get back to **Steam running and Strategic Command playable** on a WineCX
 26.3.0 base, and find out how much of our workaround pile is still needed. Expect
 most of it to be unnecessary.
 
-**Step 0 — prerequisites.** CrossOver 26.3 installed (licence renewed), and its
-version confirmed to match (command above). Keep the working
-`~/Library/Application Support/CrossOver/Bottles/Steam` bottle: it is the reference.
+**Step 0 — prerequisites: DONE.** CrossOver `26.3.0.39832` installed, `Steam`
+bottle migrated to the same version in place (do **not** rebuild that bottle — it
+carries the login and the installed game, and CrossOver upgrades bottles itself).
 
-**Step 1 — get the source.**
-```sh
-cd src
-curl -O https://media.codeweavers.com/pub/crossover/source/crossover-sources-26.3.0.tar.gz
-shasum -a 256 crossover-sources-26.3.0.tar.gz     # record this in PROVENANCE
-tar xzf crossover-sources-26.3.0.tar.gz           # -> sources/wine
-```
-Then **delete the junk**: `src/cx26/` (9.1 MB, only `dlls/`, provenance unknown) and
-optionally the old `src/crossover-sources-26.0.0.tar.gz` once 26.3.0 is in place.
+**Step 1 — get the source: WAS ALREADY DONE, and the handover said otherwise.**
+The 26.3.0 tarball was fetched on Jul 29 and extracted; earlier notes claiming "we
+only ever had 26.0.0 source" were wrong, and so was the claim that
+`runtimes/wine-cx26.3-x86_64` was misnamed — `build/wine-cx26.3-x86_64/config.status`
+records `srcdir='../../src/crossover/sources/wine'`, so it *was* built from 26.3.0.
+Its real defect is the one that matters: bare sonames, no bundled libs.
 
-**Step 2 — teach `bin/build-runtime` about WineCX.** It currently hardcodes
-assumptions about an upstream tree. Needs:
-  - a source-tree argument or `WINECX_SRC` (their layout is `sources/wine/`, not `wine/`)
-  - the output naming convention `runtimes/winecx-<cxver>-x86_64/`
-  - **write and assert a `PROVENANCE` file** (crossover_version, wine_version,
-    source_tarball, sha256, built-date) so a directory name never has to carry three
-    facts again — we already got that wrong once with `wine-cx26.3-x86_64`
-  - keep the soname-seeding + `bin/bundle-libs` step. **This is the part that does not
-    come free from CrossOver:** their shipped app bundles libraries its own way, and
-    our `runtimes/wine-cx26.3-x86_64` has **zero** bundled dylibs. Skip this and you
-    silently lose freetype, vulkan and gnutls (see `RUNTIME.md` §1 for the symptoms —
-    they look like unrelated application bugs).
-  - CrossOver's tree wants its own configure flags; check theirs rather than reusing
-    ours verbatim. `benstonezhang/winecx_build` (`build.sh`, `brew_install.sh`) is
-    worth reading first.
+`src/cx26/` is deleted. `src/crossover-sources-26.0.0.tar.gz` is kept for
+cross-version diffing — which produced a useful number: across the whole wine tree
+(12,439 files) **only ~35 files differ between CX 26.0.0 and 26.3.0**, all in
+`msctf`/IME, `user32/static.c`, `win32u/{input,main,message,window}.c` + `ntuser.h`
++ `server/window.c`, `winhttp`, `joy.cpl`, `advapi32`, `kernelbase/file.c`,
+`ntdll/unix/{env,signal_x86_64}.c`. **Nothing** in `winemac.drv`, `wow64cpu`,
+`wined3d`, `dxgi` or `winevulkan`. So a CX point-release bump is cheap, and
+graphics work does not need to fear one.
 
-**Step 3 — retire the patch pile.** Set `patches/series` to a clean slate for the new
-base. Expected outcome for each:
+**Step 2 — teach `bin/build-runtime` about WineCX: DONE.**
+`bin/build-runtime --winecx 26.3.0` builds `runtimes/winecx-26.3.0-x86_64` from
+`src/crossover/sources/wine` (override with `WINECX_SRC`, or `--src`/`--name` for
+anything else), keeps the soname-seeding + `bundle-libs` step, and writes and
+asserts `PROVENANCE`. CrossOver's tree needed **no** special configure flags — our
+existing line builds it as-is, which is why the earlier CX build succeeded; the only
+thing it was missing was the seeding. Three guards were added, each for a failure
+that had already happened here or nearly did:
 
-| patch | expectation on WineCX |
-| ----- | --------------------- |
-| `wine-0006` (WoW64 mode switch) | **delete** — is `CW HACK 20760`, already in base |
-| `wine-0007` (async WM_NCPAINT) | **delete** — is `CW Hack 20969/23427`, already in base |
-| `wine-0008` (GL forward-compat) | **delete** — is `CW Hack 24834`, already in base |
-| `wine-0004` (`WINE_APPEND_ARGS`) | **probably delete** — see Step 5 |
-| `wine-0005` (surface-flush trace) | keep as class `debug` if still wanted, but this time do **not** leave it applied in the source tree |
+  - **the version rule has teeth** — it refuses to build when CrossOver.app
+    disagrees with `--winecx` (`--allow-cx-mismatch` to override, recorded in
+    `PROVENANCE`).
+  - **the source tree must be a git repo at its own root.** ⚠️ This one is a silent
+    killer: the patch loop uses `git -C "$SRC" apply`, and an extracted tarball
+    sitting in this repo's gitignored `src/` resolves *upwards* to the outer repo,
+    prepends the path prefix, finds the patch's `dlls/...` paths do not match, and
+    prints `Skipped patch 'dlls/wow64cpu/cpu.c'.` **while exiting 0**. Every patch
+    then reports as applied and nothing is patched. It worked for `src/wine` only
+    because that tree is its own clone. (It also produced a false measurement during
+    the rebase: all five patches appeared to "apply clean" to the CX tree, including
+    ones whose code is demonstrably already there.)
+  - **after patching, the tree must differ from its tag only by the series.** This is
+    the check that was missing when an earlier session applied `CW Hack 24834`
+    straight into `src/wine` with no patch file, so clean rebuilds silently dropped
+    it — and when `wine-0005` sat applied in the tree, making its class-`debug` skip
+    meaningless.
 
-**Step 4 — bring up the prefix and Steam.** `bin/mkprefix` + install Steam. Note
-`mkprefix` has still never run end to end, so budget time for it. Alternatively clone
-`prefixes/steam-base` (APFS `cp -c` is near-instant) — but a prefix created by
-upstream 11.14 being used by CrossOver's 11.0 may want a `wineboot`; a fresh prefix is
-cleaner for a base change.
+**Step 3 — retire the patch pile: DONE.** `patches/series` is now `wine-0005`
+(class `debug`) plus the DXMT patch. The other four are in
+`patches/superseded/README.md`, which cites where each one lives in the base:
+`wow64cpu/cpu.c:253` (20760), `win32u/dce.c:1801` (20969/23427),
+`winemac.drv/opengl.c:2166` (24834), `win32u/dce.c:731-934` (23950).
+`git apply` now *refuses* 0006/0007/0008 against the base, which is redundancy
+proven by construction rather than assumed. **`wine-0004` is the exception: it is
+retired on the strength of 23950 existing, and that substitution is still untested
+— Step 5 is what settles it.**
 
-**Step 5 — the test that validates the whole pivot.**
-**Does Steam render with `WINE_APPEND_ARGS` unset?** Remove the injection from
-`bin/gamerun` (or override it empty) and launch. If `CX HACK 23950` does its job the
-window renders, and `wine-0004` plus the entire mechanism can go — closing a problem
-that consumed most of this repo's first two days. See `RUNTIME.md` §2.
+**Step 4 — bring up the prefix and Steam.** Plan: clone `prefixes/steam-base` with
+APFS `cp -Rc` and `wineboot -u` it on the WineCX runtime, because that keeps the two
+things only a human can redo — the Steam login and the S: library-folder
+registration. `steam-base` stays as the untouched 11.14 fallback. A fresh
+`bin/mkprefix` is plan B (and it still has never run end to end). Note there are
+also two forgotten prefixes from the Jul 29 CX experiments, `steam-cxbuild` and
+`steam-cxtest`: Steam installed, never logged in.
 
-**Step 6 — regression-check the game.** Strategic Command should launch, reach its
-menu with **real-time** menu response, and play a turn. If menus are slow again,
-something in the base differs from our expectation — start from
-`patches/wine-0007`'s notes.
+⚠️ Before `mkprefix` on a WineCX runtime, run `bin/get-addons` — and note it had a
+bug that would have bitten exactly here: it read the expected Wine Mono version from
+`src/wine` regardless of runtime, so a WineCX (Wine 11.0, wants mono **10.4.1**)
+runtime would have been given upstream 11.14's **11.2.0**, which Wine refuses. It now
+reads the source tree from the runtime's `PROVENANCE`. The symptom would have been a
+.NET game launcher exiting 255 with no window.
 
-**Step 7 — then the open items:** the 2 s → 20 s menu fade, and the other two games
-(Quasimorph, Battleship Command — both 64-bit Unity/D3D11, so DXMT territory and
-untouched by any of the 32-bit work).
+**Step 5 — the test that validates the whole pivot: RUN, AND IT FAILED.**
+Steam is **black** on WineCX 26.3.0 with `WINE_APPEND_ARGS` inert. `CX HACK 23950`
+does not replace `wine-0004`; it is unconditional (nothing to enable), it never fires
+for CEF windows, and CrossOver never modified `winemac.drv/surface.c`. Full
+measurements and the corrected reasoning are in `RUNTIME.md` §2. **`wine-0004` is
+back in `patches/series` as our own `workaround`, and it is the one patch this base
+requires.** With it, Steam renders and logs in — verified by seeing
+`--no-sandbox --in-process-gpu --disable-gpu` on the live `steamwebhelper.exe`
+command line, not just by the window looking right.
+
+**Step 6 — regression-check the game: PASSED, with one new regression.**
+Strategic Command launches through Steam, the .NET `Launcher.exe` runs (inherited
+Wine Mono 11.2.0 works on this 11.0 base despite it wanting 10.4.1), the game
+reaches its menu, menus respond in **real time**, and a turn plays.
+
+- **WoW64 loop: gone.** `utime 2:16.53` vs `stime 0:01.60` at ~200% CPU over 16
+  threads — 98.8% userspace. The bug produced the inverse (48 s system / 2 s user,
+  ~50,000 faults/s), so this is the clean signature. Note the *absence* of
+  `virtual_setup_exception` in the log proves nothing here, because
+  `strategic-command.env` forces `WINEDEBUG=-all`; the time ratio is the evidence.
+- **Menu latency: gone**, from the base's `CW Hack 20969/23427`.
+- **⚠️ NEW: audio jitters badly** — noticeably worse than on `wine-11.14-x86_64`.
+  This is the first genuine regression from the base change.
+- Between-menu transitions are still slow, i.e. the 2 s → 20 s fade is **unchanged**.
+
+**Step 7 — the open items, in the order they now deserve.**
+
+1. ~~**`WINEMSYNC=1`**~~ — **TRIED 2026-07-31. It is NOT the audio fix.** Enabled and
+   *verified active* (see below); the audio jitter is unchanged. Keep it on anyway,
+   since it is what the reference bottle runs, but cross it off as the explanation.
+
+   **This one is properly excluded, unlike last time.** The verification, for reuse:
+   ```
+   msync: bootstrapped mach port on wine-4d24cc4-msync.
+   msync: up and running.
+   0024:trace:sync:request_shm_from_server requesting shm entry 0 from server
+   ```
+   with `WINEMSYNC=1 WINEDEBUG=+sync` — 114 `shm entry` traces across 44 wine pids,
+   **0** `Server is running with WINEMSYNC but this process is not`, and **0**
+   `mach_msg instead of mach_msg2` (so the fast trap, not the fallback). The prefix
+   must be fully down first: the wineserver reads the variable too.
+
+   The mechanics, for whoever needs them next — msync is opt-in per process *and per
+   server*:
+
+   ```c
+   do_msync_cached = getenv("WINEMSYNC") && atoi(getenv("WINEMSYNC"));
+   ```
+   `dlls/ntdll/unix/msync.c:422` and `server/msync.c:533` (plus `WINEMSYNC_QLIMIT`).
+
+   So every wait in our runs goes through the wineserver round-trip while the
+   reference bottle uses msync — which fits both new symptoms (audio jitter, slow
+   transitions). Requirements and the reason this is worth doing carefully:
+   - **the wineserver must be started with it too**, so the whole prefix has to come
+     down first — a running server plus a msync client is a mismatch;
+   - that mismatch is *detectable*, which is the point: `msync.c:600` has
+     `ERR("Server is running with WINEMSYNC but this process is not, ...")`. This is
+     the control the docs said was missing when msync was previously written off as
+     "not demonstrated". **Verify the variable arrived; do not assume it.**
+2. **⚠️ THE OPEN REGRESSION: audio jitter, and rougher animation.** Now the top item.
+   On `winecx-26.3.0` the game's audio jitters badly and its start animation is
+   visibly rougher than on `wine-11.14-x86_64`, where audio was fine. Everything else
+   is held constant — same host, same prefix lineage (`steam-winecx` is an APFS clone
+   of `steam-base`), same game, and the same SC3 virtual desktop (that registry entry
+   dates from 2026-07-30 16:01, i.e. it was already in place during the *smooth* 11.14
+   runs, so it is not the cause). **Only the Wine build changed.**
+
+   Ruled out already: msync (item 1), and CrossOver's audio delta itself — their
+   `winecoreaudio.drv` divergence from upstream 11.0 is *only* microphone-permission
+   code (`authorization.m`, `CoreAudio_get_capture_authorization_status`), with no
+   latency tunable and no env/registry knob. `dsound/dsound.c` also differs and is
+   unexamined.
+
+   **The splitting test was run, and hypothesis (b) won: the CrossOver 26.3 bottle
+   plays the same game with clean audio.** Same Wine version (11.0), same host, their
+   binaries. So the 11.0 base is *not* the problem — **our build of their source is**,
+   which merges this with the repo's other unresolved item (our build of their tree
+   reporting a dummy GPU card). Two symptoms, one likely cause.
+
+   | | hypothesis | verdict |
+   | - | ---------- | ------- |
+   | a | upstream improved audio/timing between 11.0 and 11.14 | **refuted** — their 11.0 bottle is clean |
+   | b | **our build** of their tree differs from their shipped binaries | **supported** |
+
+   ### The leading candidate: deployment target
+
+   Their whole runtime is built for an old macOS; ours targets the host:
+
+   | | `minos` | `sdk` |
+   | - | ------- | ----- |
+   | CrossOver's shipped `ntdll.so`, `winemac.so`, `win32u.so`, `winecoreaudio.so`, `wineserver` | **10.15** | 15.1 |
+   | ours, same modules | **26.0** | 26.5 |
+
+   macOS switches framework behaviour on this "linked-on-or-after" value, so identical
+   source can behave differently — and it is a candidate for the NSWindow main-thread
+   exception too, since that check is deployment-target gated. We pass **no**
+   `-mmacosx-version-min` and set no `MACOSX_DEPLOYMENT_TARGET` anywhere in `bin/`
+   (verified), while their `configure.ac` passes `-mmacosx-version-min=10.7` for the
+   loader and preloader. **Next action: set `MACOSX_DEPLOYMENT_TARGET=10.15` in
+   `bin/env-build-x86_64.sh`, rebuild, and listen.** Caveat to state honestly: we would
+   still compile against SDK 26.5 where they use 15.1, so this makes us *closer* to
+   their build, not identical.
+
+   ### CPU: a real difference, but measure the same phase
+
+   | build | audio | CPU in game | CPU at the menu |
+   | ----- | ----- | ----------- | --------------- |
+   | our upstream `wine-11.14-x86_64` | fine | **~100%** | — |
+   | CrossOver 26.3, shipped binaries | fine | **~101%** (one busy thread, 94.6%) | ~101% |
+   | **our `winecx-26.3.0-x86_64`** | **jitters** | **~200%** | 114% (99% + 14.4%) |
+   | threads | | 15 both | 15 both |
+
+   **The extra core tracks the jitter, and it is specific to our build of their tree** —
+   both builds that sound fine sit at ~100%, ours at ~200%. Thread count is identical,
+   so it is not an extra thread being created; something that should idle is spinning.
+
+   ⚠️ **Do not repeat the "we burn twice the CPU" claim without matching phases** — the
+   200% reading was taken during gameplay and the 101% at the menu, and at the menu
+   ours is 114%. The genuine, phase-matched finding is the **extra ~14% thread**
+   (`PRI 40T`) that CrossOver does not appear to have. Identifying it is the concrete
+   next measurement, and it needs both sides sampled in the *same* phase.
+
+   `sample(1)` cannot symbolise the hot code: 4,500 of ~5,265 thread-samples sit at one
+   unresolved address inside the Rosetta-translated region, i.e. in the game's own
+   translated code rather than in Wine. Thread *names* do come through, and the audio
+   plumbing is all present and correct (`com.apple.audio.IOThread.client`,
+   `audio_client_timer`, `wine_dsound_mixer`, `mmdevapi_midi_notify`). `ps -E` on
+   another process returns nothing (macOS blocks it), so CrossOver's runtime
+   environment cannot be read that way.
+
+   **Do (b)'s test first — run the game in the CrossOver 26.3 bottle and listen.** It
+   costs no build time, and the bottle is now the same Wine version as our runtime.
+   While listening, also grab `ps -o utime=,stime=,%cpu=` on their game process: ours
+   runs at ~200% CPU with `utime 2:16 / stime 0:01`, and a materially lower number
+   there would be independent evidence for (b).
+
+   If (b) holds, this merges with the repo's other unresolved item — *"why did our
+   build of CrossOver's own published source not behave like their shipped binaries?"*
+   (GPU identification fell back to a dummy card). Two symptoms, one cause, and worth
+   far more than the audio: it would mean our whole build recipe diverges from theirs
+   in some way we have not found. Next step there is to compare their build
+   configuration, not their source — start with the shipped
+   `/Applications/CrossOver.app/.../wine` binaries (`otool -L`, linked frameworks,
+   optimisation/codegen) against ours.
+
+   To isolate (a) offline and without needing CrossOver at all: build **upstream 11.0**
+   properly (we have `src/wine-11.0`; the existing `runtimes/wine-11.0-x86_64` is
+   degraded — no bundled libs — so it cannot be used for this) and test audio on it.
+   Three points then bracket the answer: upstream 11.0, CX 11.0, upstream 11.14.
+3. **The 2 s → 20 s menu fade** — unchanged by the rebase. Candidate `CXHACK 19488`
+   noted above; re-measure before theorising.
+4. **The other two games** — Quasimorph, Battleship Command, both 64-bit Unity/D3D11,
+   so DXMT territory and untouched by any of the 32-bit work.
+5. **The SDL2/`winebus` crash** from `RUNTIME.md` §1 — decide whether to drop SDL2
+   from the bundle or fix the dlopen. Gamepads do not work either way today.
 
 ### What carries over, and what does not
 
@@ -209,15 +399,16 @@ untouched by any of the 32-bit work).
   `gamerun`, `killwine`, `get-addons`, `compare-bottle`), `profiles/`,
   `tools/probes/`, the bundled-libs/soname-seeding approach (`RUNTIME.md` §1), and
   the documented negative results below.
-- **Becomes redundant:** `wine-0004` (23950 replaces it), `wine-0006` (= 20760),
-  `wine-0007` (= 20969/23427), `wine-0008` (= 24834). All four are CrossOver ports
-  or workarounds for things CrossOver fixes. Keep them until the rebase lands so
-  the game keeps working; delete them after.
-- **Watch out:** `runtimes/wine-cx26.3-x86_64` **is misnamed** — it is CX-built
-  (contains the `lretq` thunk) but we only ever had 26.0.0 source, so "26.3" is
-  unverified. And it has **zero bundled libs**, so `RUNTIME.md` §1's work must be
-  re-applied to any CX-based runtime or you silently lose freetype/vulkan/gnutls.
-  `src/cx26/` is a 9.1 MB partial extraction (only `dlls/`) — junk, delete it.
+- **Became redundant, and are now in `patches/superseded/`:** `wine-0004` (23950
+  replaces it — *pending Step 5*), `wine-0006` (= 20760), `wine-0007` (= 20969/23427),
+  `wine-0008` (= 24834). They are still needed to reproduce the upstream fallback
+  runtime `wine-11.14-x86_64`, whose source tree `src/wine` has all four applied —
+  which is why `src/wine` is deliberately left dirty rather than reset.
+- **Watch out:** `runtimes/wine-cx26.3-x86_64` has **zero bundled libs**, so it is
+  not a usable runtime and never was — `RUNTIME.md` §1's work must be applied to any
+  CX-based runtime or you silently lose freetype/vulkan/gnutls. (It is *not* misnamed;
+  an earlier note claiming that was wrong. It is superseded by
+  `runtimes/winecx-26.3.0-x86_64` and can be deleted once that one is proven.)
 
 ---
 
@@ -226,20 +417,21 @@ untouched by any of the 32-bit work).
 Read this file, then `RUNTIME.md`. `PROJECT.md` is history — useful, but it
 contains conclusions that were later disproved and are marked as such.
 
-Everything below this line describes the **current, upstream-based** tree. It is
-still accurate and the game runs, but see the pivot above before extending it.
+Everything below this line describes the **upstream-based** tree, which is now the
+**fallback**, not the base. It is still accurate and the game runs on it — see the
+rebase status above for what replaces it.
 
 **The environment works.** Steam runs, renders and logs in with no environment
 variables. Don't re-derive any of that.
 
-**Reproducibility, precisely** (this claim used to be overstated): every
-modification in `src/wine` now has a patch file in `patches/series`, so
-`bin/build-runtime` from a clean checkout reproduces the runtime — with one known
-difference. `wine-0005` is class `debug`, so a clean build **omits** it, whereas the
-currently-installed runtime **has** it applied (it was applied directly in
-`src/wine`, which made the class-`debug` skip meaningless). A clean rebuild is
-therefore correct-but-not-byte-identical. Resolve by reverting `wine-0005` in
-`src/wine`, or reclassifying it.
+**Reproducibility of the fallback runtime.** Every modification in `src/wine` has a
+patch file, but those patches now live in `patches/superseded/` rather than
+`patches/series`, so rebuilding `wine-11.14-x86_64` means naming them explicitly.
+`src/wine` is deliberately left with all five applied — it is the source of the
+runtime that currently works, and resetting it would strand that runtime. Note
+`wine-0005` (class `debug`) being applied there is why the old "a clean rebuild
+reproduces this runtime" claim was only approximately true; on the WineCX base
+`build-runtime` now asserts that this cannot happen again.
 
 **The task is Strategic Command WWII. It is NOT a graphics problem — root cause
 found 2026-07-30.** The game never gets anywhere near drawing. It dies in
@@ -458,10 +650,25 @@ took hours to provision. Use a throwaway `bin/mkprefix` prefix.
 
 ## Next actions, in order
 
-**0. THE PIVOT (see top of file).** Rebase onto WineCX — CodeWeavers' published
-CrossOver Wine source, **version 26.3.0**, matching the installed CrossOver 26.3 so
-the A/B reference survives. Follow "THE REBUILD" at the top of this file. Everything
-below is either superseded by it or unaffected.
+**0. THE PIVOT — LANDED 2026-07-31.** The runtime is
+`runtimes/winecx-26.3.0-x86_64` (WineCX 26.3.0 = CrossOver 26.3.0 = Wine 11.0), built
+by `bin/build-runtime --winecx 26.3.0`, prefix `prefixes/steam-winecx`. Steam renders
+and logs in; Strategic Command reaches its menu with real-time menus and plays a turn.
+`patches/series` carries exactly **one** functional delta of ours (`wine-0004`) plus a
+`debug` patch — down from four ports of CodeWeavers' hacks.
+
+Launch it with:
+```sh
+RUNTIME=winecx-26.3.0-x86_64 PREFIX=steam-winecx bin/gamerun steam
+RUNTIME=winecx-26.3.0-x86_64 PREFIX=steam-winecx bin/gamerun strategic-command
+```
+(`RUNTIME`/`BACKEND`/`PREFIX` in the environment now override a profile, so the old
+`wine-11.14-x86_64` + `steam-base` combination is still one command away for A/B.
+The profiles themselves still name the old runtime — switch them once msync and the
+audio regression are settled.)
+
+Read "THE REBUILD" above for what each step actually produced, then Step 7 for what is
+open. The next thing to try is **`WINEMSYNC=1`**.
 
 1. ~~Re-apply the wow64cpu fix~~ — **done.** `patches/wine-0006` is applied, built
    and installed; the game reaches its menu and plays a turn of the 1939 campaign.
@@ -482,7 +689,20 @@ below is either superseded by it or unaffected.
    for a latency bug wasted most of the investigation.
 
 1c. **Still open: the 2 s → 20 s menu fade.** Same family as 1b, almost certainly
-   another CrossOver paint/timer hack. Good first target once rebased.
+   another CrossOver paint/timer hack. Good first target once rebased — and the first
+   thing to do is simply *re-measure it on the WineCX runtime*, because the base may
+   already fix it.
+
+   Candidate, found while rebasing and **not yet tested**: `CXHACK 19488` in
+   `dlls/win32u/message.c:3218`. For a window with `WS_EX_COMPOSITED` it dispatches
+   `WM_PAINT` synchronously and then clears `PM_QS_PAINT` from the peek flags, i.e. it
+   collapses repeated paint churn on exactly the kind of window an animated fade uses.
+   Enumerate the rest with:
+
+   ```sh
+   grep -rn -E 'CW ?HACK|CW Hack|CX ?HACK|CXHACK|CrossOver Hack' --include='*.c' \
+     src/crossover/sources/wine/dlls/win32u src/crossover/sources/wine/dlls/winemac.drv
+   ```
 
 2. **Then the other two games** — Quasimorph and Battleship Command, both Unity
    D3D11, so DXMT is the intended backend. Note they are **64-bit**, so they do
@@ -634,6 +854,34 @@ right call there.
 
 ## Do not re-chase these (measured and refuted)
 
+- *"The `NSWindow should only be instantiated on the main thread!` exception is a
+  WineCX problem."* **No — it is ours, and the mechanism is measured (2026-07-31).**
+  The call stack names it outright:
+
+  ```
+  30  winebus.so   sdl_bus_init + 76
+  29  dyld         dlopen_from  ->  runInitializers / forEachInitializer
+      libc++abi: terminating due to uncaught exception of type NSException
+  ```
+
+  `winebus` (gamepad support) `dlopen`s **our bundled `libSDL2`**, and SDL2's dyld
+  initializer instantiates an `NSWindow` off the Cocoa main thread, which macOS 26
+  turns into a hard exception. That kills the `winebus` service — hence
+  `scmdatabase_autostart_services Auto-start service L"winebus" failed to start: 1053`
+  in the same log — so **gamepads do not work**, which is exactly what bundling SDL2
+  was for. See `RUNTIME.md` §1.
+
+  It is pre-existing rather than a rebase regression: `wine-11.14-x86_64`, the runtime
+  that runs Steam and plays Strategic Command, does the identical thing. Not a
+  blocker for keyboard/mouse titles.
+
+  Method note, worth more than the bug: the three-runtime A/B initially looked like a
+  WineCX-only fault because `wine-11.0-x86_64` reported **zero** exceptions. But that
+  runtime prints *"Wine cannot find the FreeType font library"* — it has **no bundled
+  libs at all**, so its `dlopen` of SDL2 simply fails and the crash cannot happen.
+  **A control that is itself broken is not a control.** Reading its clean result as
+  exculpating our build would have produced a confident wrong conclusion; what
+  actually settled it was the call stack, not the comparison.
 - *"Strategic Command is a rendering/black-window problem."* No. It never
   reaches drawing. It is the WoW64 32→64 mode-switch fault above. The black
   fullscreen window with hourglass is *identical* to CrossOver's first ~30 s and
