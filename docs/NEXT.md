@@ -1,5 +1,9 @@
 # Continue here
 
+> **New session?** Start with **`docs/START-HERE-NEXT-SESSION.md`** — it is the
+> orientation brief: the goal, what is already settled, the three traps that will
+> bite you, and how to work in this repo. Then come back here for the detail.
+
 ## ⚠️ THE PIVOT — read this before anything else (decided 2026-07-30)
 
 ### DECISION
