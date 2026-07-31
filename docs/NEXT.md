@@ -11,25 +11,33 @@ Wine.** Do not start new work against `src/wine` (upstream 11.14).
 top of WineCX**. If a patch there is a port of a `CW HACK`, that is a smell: it
 means we are re-deriving, and the answer is to take it from the base instead.
 
-**STILL TO DECIDE: which version — 26.0.0 or 26.3.0?** The trade-off is *not* about
-features; it is about keeping the A/B reference:
+**VERSION: WineCX 26.3.0.** Decided 2026-07-31. Gil is renewing the CrossOver
+licence to run **CrossOver 26.3**, so the installed app and our source tree match.
 
-| | 26.0.0 | 26.3.0 |
-| --- | ------ | ------ |
-| matches the CrossOver **currently installed** (26.0) | ✅ A/B against a working bottle stays possible | ❌ source newer than the app |
-| we already have the tarball on disk | ✅ `src/crossover-sources-26.0.0.tar.gz` | ❌ 142 MB download |
-| newest fixes | ❌ | ✅ |
+**That matching is a hard rule, not a nicety.** The A/B reference against a working
+bottle was decisive **four separate times** in a single session — the `lretq` diff,
+the `WINEMSYNC=1` discovery, the `winmm/time.c` null result, and the paint hacks.
+Every real finding came from it. So:
 
-The A/B reference was decisive **four separate times** in one session (the `lretq`
-diff, the `WINEMSYNC=1` discovery, the `winmm` null result, the paint hacks). Do not
-give it up to gain a few months of fixes. **Rule: the source version must match the
-installed CrossOver.app version.** Gil is renewing the licence to get the latest
-app — so pick whichever version the freshly-installed app reports, and check with:
+> **Rule: the WineCX source version must equal the installed CrossOver.app version.**
+> When one is upgraded, upgrade the other in the same change.
+
+Verify they agree with:
 
 ```sh
 /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
-  /Applications/CrossOver.app/Contents/Info.plist
+  /Applications/CrossOver.app/Contents/Info.plist        # expect 26.3
+cat runtimes/winecx-*/PROVENANCE                          # expect crossover_version: 26.3.0
 ```
+
+### Why this base, in one sentence
+
+The objective is for our own macOS work — `wine_mesa_gl` and similar — to be
+**adopted by the people who actually ship Wine on macOS, i.e. CodeWeavers**. You do
+not get adopted by developing against a tree they do not ship. Their tree is both
+the realistic integration target *and* the only one load-tested on this platform, so
+it is the base. Upstream-Wine purity was never the goal and cost us two days of
+re-deriving fixes CodeWeavers had already made.
 
 ### Terminology, because three version numbers get confused
 
@@ -98,7 +106,7 @@ Researched 2026-07-30. **No maintained git repo tracks current CrossOver.**
 Direct download works and needs no auth (substitute the version you settle on):
 
 ```sh
-CXVER=26.3.0   # or 26.0.0 -- see "STILL TO DECIDE" above
+CXVER=26.3.0   # must equal the installed CrossOver.app version -- see the Rule above
 curl -O "https://media.codeweavers.com/pub/crossover/source/crossover-sources-$CXVER.tar.gz"
 ```
 
@@ -123,11 +131,73 @@ here rather than re-deriving fixes.
 **Plan: fetch the matching `crossover-sources-<ver>.tar.gz`, commit that tree as the
 base, and keep `patches/series` for our own deltas only.**
 
-### First test after the rebase — validates the whole pivot in one step
+### THE REBUILD — start the next session here
 
-**Does Steam render on the CrossOver-based runtime with `WINE_APPEND_ARGS` unset?**
-If `CX HACK 23950` does its job, delete `patches/wine-0004-…` and the entire
-injection mechanism. See `RUNTIME.md` §2.
+Goal: get back to **Steam running and Strategic Command playable** on a WineCX
+26.3.0 base, and find out how much of our workaround pile is still needed. Expect
+most of it to be unnecessary.
+
+**Step 0 — prerequisites.** CrossOver 26.3 installed (licence renewed), and its
+version confirmed to match (command above). Keep the working
+`~/Library/Application Support/CrossOver/Bottles/Steam` bottle: it is the reference.
+
+**Step 1 — get the source.**
+```sh
+cd src
+curl -O https://media.codeweavers.com/pub/crossover/source/crossover-sources-26.3.0.tar.gz
+shasum -a 256 crossover-sources-26.3.0.tar.gz     # record this in PROVENANCE
+tar xzf crossover-sources-26.3.0.tar.gz           # -> sources/wine
+```
+Then **delete the junk**: `src/cx26/` (9.1 MB, only `dlls/`, provenance unknown) and
+optionally the old `src/crossover-sources-26.0.0.tar.gz` once 26.3.0 is in place.
+
+**Step 2 — teach `bin/build-runtime` about WineCX.** It currently hardcodes
+assumptions about an upstream tree. Needs:
+  - a source-tree argument or `WINECX_SRC` (their layout is `sources/wine/`, not `wine/`)
+  - the output naming convention `runtimes/winecx-<cxver>-x86_64/`
+  - **write and assert a `PROVENANCE` file** (crossover_version, wine_version,
+    source_tarball, sha256, built-date) so a directory name never has to carry three
+    facts again — we already got that wrong once with `wine-cx26.3-x86_64`
+  - keep the soname-seeding + `bin/bundle-libs` step. **This is the part that does not
+    come free from CrossOver:** their shipped app bundles libraries its own way, and
+    our `runtimes/wine-cx26.3-x86_64` has **zero** bundled dylibs. Skip this and you
+    silently lose freetype, vulkan and gnutls (see `RUNTIME.md` §1 for the symptoms —
+    they look like unrelated application bugs).
+  - CrossOver's tree wants its own configure flags; check theirs rather than reusing
+    ours verbatim. `benstonezhang/winecx_build` (`build.sh`, `brew_install.sh`) is
+    worth reading first.
+
+**Step 3 — retire the patch pile.** Set `patches/series` to a clean slate for the new
+base. Expected outcome for each:
+
+| patch | expectation on WineCX |
+| ----- | --------------------- |
+| `wine-0006` (WoW64 mode switch) | **delete** — is `CW HACK 20760`, already in base |
+| `wine-0007` (async WM_NCPAINT) | **delete** — is `CW Hack 20969/23427`, already in base |
+| `wine-0008` (GL forward-compat) | **delete** — is `CW Hack 24834`, already in base |
+| `wine-0004` (`WINE_APPEND_ARGS`) | **probably delete** — see Step 5 |
+| `wine-0005` (surface-flush trace) | keep as class `debug` if still wanted, but this time do **not** leave it applied in the source tree |
+
+**Step 4 — bring up the prefix and Steam.** `bin/mkprefix` + install Steam. Note
+`mkprefix` has still never run end to end, so budget time for it. Alternatively clone
+`prefixes/steam-base` (APFS `cp -c` is near-instant) — but a prefix created by
+upstream 11.14 being used by CrossOver's 11.0 may want a `wineboot`; a fresh prefix is
+cleaner for a base change.
+
+**Step 5 — the test that validates the whole pivot.**
+**Does Steam render with `WINE_APPEND_ARGS` unset?** Remove the injection from
+`bin/gamerun` (or override it empty) and launch. If `CX HACK 23950` does its job the
+window renders, and `wine-0004` plus the entire mechanism can go — closing a problem
+that consumed most of this repo's first two days. See `RUNTIME.md` §2.
+
+**Step 6 — regression-check the game.** Strategic Command should launch, reach its
+menu with **real-time** menu response, and play a turn. If menus are slow again,
+something in the base differs from our expectation — start from
+`patches/wine-0007`'s notes.
+
+**Step 7 — then the open items:** the 2 s → 20 s menu fade, and the other two games
+(Quasimorph, Battleship Command — both 64-bit Unity/D3D11, so DXMT territory and
+untouched by any of the 32-bit work).
 
 ### What carries over, and what does not
 
@@ -385,8 +455,8 @@ took hours to provision. Use a throwaway `bin/mkprefix` prefix.
 ## Next actions, in order
 
 **0. THE PIVOT (see top of file).** Rebase onto WineCX — CodeWeavers' published
-CrossOver Wine source. Version still to pick (26.0.0 vs 26.3.0); the rule is that it
-must match the installed CrossOver.app so the A/B reference survives. Everything
+CrossOver Wine source, **version 26.3.0**, matching the installed CrossOver 26.3 so
+the A/B reference survives. Follow "THE REBUILD" at the top of this file. Everything
 below is either superseded by it or unaffected.
 
 1. ~~Re-apply the wow64cpu fix~~ — **done.** `patches/wine-0006` is applied, built
