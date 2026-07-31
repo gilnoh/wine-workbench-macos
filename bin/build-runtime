@@ -45,6 +45,7 @@ while [ $# -gt 0 ]; do
         --with-debug) WITH_DEBUG=1; shift ;;     # also apply class 'debug' patches
         --force)   FORCE=1; shift ;;
         --allow-cx-mismatch) ALLOW_CX_MISMATCH=1; shift ;;
+        --pe-gcc)  PE_GCC=1; shift ;;            # mingw-gcc + forced SSE math
         *) die "unknown option: $1" ;;
     esac
 done
@@ -235,7 +236,44 @@ info "  tree differs from $(git -C "$SRC" describe --tags --always 2>/dev/null) 
 # for configure. Plain `gcc` under `arch -x86_64` still targets arm64 here, and
 # configure's link tests then fail against the x86_64 Homebrew libraries --
 # silently dropping gnutls, freetype and vulkan from the resulting runtime.
-CONFIGURE_ARGS="--build=x86_64-apple-darwin --enable-archs=i386,x86_64 --prefix=$PREFIX --disable-tests --with-vulkan --with-mingw --with-freetype --with-gnutls --without-x"
+# --- the PE compiler, and why it is not mingw-gcc -------------------------
+# MEASURED 2026-07-31: with Homebrew's i686-w64-mingw32-gcc, our 32-bit PE DLLs
+# compiled floating-point math to **x87** -- dsound.dll came out with 1334 x87
+# instructions and ZERO SSE, where CrossOver's shipped DLL has 741 SSE and 52
+# x87. Rosetta 2 emulates x87 badly and SSE well, so wine_dsound_mixer burned a
+# whole core (100% vs 1.5%) and the game's audio jittered. GCC targeting i386
+# defaults to x87; clang targeting i686-windows defaults to SSE, which is both
+# what CrossOver ships and what upstream Wine recommends (clang + lld).
+#
+# configure takes `--with-mingw=<path to clang>` (configure.ac:414) and derives
+# --target=i686-windows itself (configure.ac:466), so this is the whole change.
+#
+# ⚠️ clang is NOT yet proven end to end here: a clang-built runtime produced
+# correct SSE code but could not connect to Steam (`EConnect` retried every 50 ms
+# forever, no TLS errors -- see docs/NEXT.md). Until that is understood, --pe-gcc
+# is the safe route: it keeps the toolchain that works and only fixes the float
+# math, which is the one variable that matters here.
+PE_CFLAGS_ARG=""
+if [ "${PE_GCC:-0}" = 1 ]; then
+    MINGW_ARG="--with-mingw"
+    PE_CC="i686-w64-mingw32-gcc (SSE forced)"
+    PE_CFLAGS_ARG="i386_CFLAGS='-g -O2 -msse2 -mfpmath=sse'"
+elif [ -n "${PE_CC:-}" ]; then
+    MINGW_ARG="--with-mingw=$PE_CC"
+elif [ -x /usr/local/opt/llvm/bin/clang ]; then
+    MINGW_ARG="--with-mingw=/usr/local/opt/llvm/bin/clang"
+    PE_CC=/usr/local/opt/llvm/bin/clang
+else
+    # Fall back to mingw-gcc, but force SSE math -- otherwise the i386 PE build
+    # silently regresses to x87 and everything float-heavy crawls under Rosetta.
+    MINGW_ARG="--with-mingw"
+    PE_CC="i686-w64-mingw32-gcc (SSE forced)"
+    PE_CFLAGS_ARG="i386_CFLAGS='-g -O2 -msse2 -mfpmath=sse'"
+    info "no clang found for PE; using mingw-gcc with -msse2 -mfpmath=sse"
+fi
+info "PE compiler: $PE_CC"
+
+CONFIGURE_ARGS="--build=x86_64-apple-darwin --enable-archs=i386,x86_64 --prefix=$PREFIX --disable-tests --with-vulkan $MINGW_ARG --with-freetype --with-gnutls --without-x"
 build_script="$(mktemp)"
 trap 'rm -f "$build_script"' EXIT
 cat > "$build_script" <<EOF
@@ -247,7 +285,7 @@ export CXX="g++ -arch x86_64"
 mkdir -p "$BUILD"
 cd "$BUILD"
 if [ ! -f Makefile ]; then
-  "$SRC/configure" $SEED $CONFIGURE_ARGS
+  "$SRC/configure" $SEED $CONFIGURE_ARGS $PE_CFLAGS_ARG
 fi
 make CC="gcc -arch x86_64" -j$JOBS
 make install
@@ -274,6 +312,20 @@ for s in SONAME_LIBVULKAN SONAME_LIBFREETYPE SONAME_LIBGNUTLS SONAME_LIBSDL2; do
     grep -qE "define $s \"/" "$cfg" || die "$s is a bare soname, not an absolute path -- seeding failed"
 done
 info "  sonames are absolute paths into the bundle"
+# The 32-bit PE build must use SSE for float math, not x87. This is a silent
+# failure of exactly the kind this script exists to catch: everything builds and
+# runs, and float-heavy 32-bit code is simply ~60x slower under Rosetta. dsound
+# is the canary because its mixer is float-heavy and audibly breaks.
+canary="$PREFIX/lib/wine/i386-windows/dsound.dll"
+if [ -f "$canary" ]; then
+    sse=$(objdump -d "$canary" 2>/dev/null | grep -cE '\b(mulss|mulps|addss|addps)\b')
+    x87=$(objdump -d "$canary" 2>/dev/null | grep -cE '\b(fmul|fadd|fld)[a-z]*\b')
+    [ "${sse:-0}" -gt 0 ] || die "i386 PE float math is x87, not SSE (dsound.dll: $sse SSE, $x87 x87)
+  Rosetta 2 emulates x87 badly; this makes float-heavy 32-bit code ~60x slower and
+  was the cause of the dsound mixer burning a core. Use clang for the PE build, or
+  add -msse2 -mfpmath=sse to i386_CFLAGS. See docs/NEXT.md."
+    info "  i386 PE float math: $sse SSE / $x87 x87 instructions in dsound.dll"
+fi
 for a in x86_64-windows i386-windows x86_64-unix; do
     [ -d "$PREFIX/lib/wine/$a" ] || die "missing arch dir: $a"
 done
@@ -303,6 +355,12 @@ fi
         echo "sha256:            ${sha:-unavailable (tarball not on disk)}"
         echo "crossover_app_at_build: ${CX_INSTALLED:-none}"
     fi
+    # macOS switches framework behaviour on the binary's deployment target
+    # ("linked on or after"), so two builds of identical source can behave
+    # differently. CrossOver ships minos 10.15; a host-default build gets the
+    # host's version. Record it -- it is not visible in the configure line.
+    echo "deployment_target: ${MACOSX_DEPLOYMENT_TARGET:-<host default>}"
+    echo "pe_compiler:       $PE_CC"
     echo "source_tree:       ${SRC#$GAMES_ROOT/}"
     echo "source_commit:     $(git -C "$SRC" rev-parse HEAD 2>/dev/null)"
     echo "source_base:       $(git -C "$SRC" describe --tags --always 2>/dev/null)"

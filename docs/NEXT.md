@@ -342,16 +342,164 @@ reaches its menu, menus respond in **real time**, and a turn plays.
 
    ### CPU: a real difference, but measure the same phase
 
-   | build | audio | CPU in game | CPU at the menu |
-   | ----- | ----- | ----------- | --------------- |
-   | our upstream `wine-11.14-x86_64` | fine | **~100%** | — |
-   | CrossOver 26.3, shipped binaries | fine | **~101%** (one busy thread, 94.6%) | ~101% |
-   | **our `winecx-26.3.0-x86_64`** | **jitters** | **~200%** | 114% (99% + 14.4%) |
-   | threads | | 15 both | 15 both |
+   **Localised 2026-07-31: our build runs one extra thread flat out.** All three
+   measured at the *menu* phase, same game, same host, via
+   `bin/gamerun strategic-command-direct` (no clicking needed) and
+   `ps -M <pid>` — note `ps -M` must be parsed per row, since the header row has
+   `PRI` in field 6 and thread rows in field 4:
 
-   **The extra core tracks the jitter, and it is specific to our build of their tree** —
-   both builds that sound fine sit at ~100%, ours at ~200%. Thread count is identical,
-   so it is not an extra thread being created; something that should idle is spinning.
+   | build | audio | total CPU | busy threads | R-band / T-band |
+   | ----- | ----- | --------- | ------------ | --------------- |
+   | our `wine-11.14-x86_64` | fine | **102.5%** | **one** — `31T` @ 99.4% | 5 / 11 |
+   | CrossOver 26.3 shipped | fine | **~101%** | **one** — `31T` @ 94.6% | present |
+   | **our `winecx-26.3.0-x86_64`** | **jitters** | **199.4%** | **two** — `31T` @ 99.0% **plus `63T` @ 99.9%** | 5 / 10 |
+
+   The `31T` thread at ~99% is the game's main loop and is identical in all three. The
+   **`63T` thread spinning at 99.9% exists only in our WineCX build** — that is the
+   whole 100% difference. `63T` is a *boosted* timeshare priority, i.e. a thread that
+   keeps waking up rather than computing steadily.
+
+   ### The extra thread is `wine_dsound_mixer`
+
+   Identified by correlating `ps -M` (per-thread CPU, kernel order) with `sample`
+   (thread names, same order) — `sample` alone cannot attribute CPU, as it reports an
+   identical sample count for every thread:
+
+   ```
+   idx  PRI   %CPU   name
+    2   31T   99.0   (unnamed -- the game's main loop)
+    8   97R    0.0   com.apple.audio.IOThread.client
+    9   63R    0.0   audio_client_timer
+   10   63T  100.0   wine_dsound_mixer     <-- the extra core
+   14   31T    0.0   mmdevapi_midi_notify
+   ```
+
+   The index alignment is self-corroborating: the two audio helpers land on exactly the
+   realtime priorities they should (97R for the CoreAudio IO thread, 63R for the audio
+   timer). **So the audio mixer itself is the thing burning the core**, which explains
+   the jitter and the extra 100% together, in a DirectSound title.
+
+   Mechanics, for whoever picks this up (`dlls/dsound/`):
+   - `DSOUND_mixthread` (`mixer.c:760`) loops on
+     `WaitForSingleObject(dev->sleepev, dev->sleeptime)`.
+   - `sleeptime` cannot collapse to zero: `primary.c:345` sets it to `5` when
+     `period_ms < 3`, else `period_ms * 5 / 2`. So a zero timeout is **not** the cause.
+   - The render path is event-driven — `AUDCLNT_STREAMFLAGS_EVENTCALLBACK` plus
+     `IAudioClient_SetEventHandle(client, device->sleepev)` (`primary.c:288`, `:296`) —
+     so the mixer wakes whenever `winecoreaudio`/`mmdevapi` signals a period. Either
+     the driver signals far too often, or each wake does far too much work.
+   - The CoreAudio IO thread sits at **0.0%**, so the driver is not itself spinning.
+   - **CrossOver's dsound is not the difference**: their only change from upstream 11.0
+     is `CX HACK 21897`, a `Sleep(100)` for a Fallout 4 race. Upstream, however,
+     reworked dsound substantially between 11.0 and 11.14 (`mixer.c`, `dsound_main.c`,
+     `primary.c`, `dsound_convert.c`, `fir.h`, and `make_fir` was removed), which is why
+     our 11.14 build has a different — and healthy — mixer.
+
+   That left the puzzle sharp: **the same 11.0-era mixer code is fine in CrossOver's
+   shipped build and spins in ours.**
+
+   ### ✅ ROOT CAUSE (2026-07-31): our 32-bit PE DLLs compile float math to x87
+
+   Found by swapping **only** CrossOver's `dsound.dll` (both arches) into a clone of our
+   runtime — same runtime, same prefix, same game, one file different:
+
+   | | our `dsound.dll` | CrossOver's `dsound.dll` |
+   | - | ---------------- | ------------------------ |
+   | total CPU | **197.8%** | **101.0%** |
+   | `wine_dsound_mixer` | **100%** at `63T` | **1.5%** at `63R` |
+
+   ~60× the CPU for the same work, so the fault is in the compiled PE, not the
+   environment. Disassembling both 32-bit DLLs says why:
+
+   | `i386` dsound.dll | x87 instructions | SSE instructions |
+   | ----------------- | ---------------- | ---------------- |
+   | CrossOver | 52 | **741** |
+   | **ours** | **1334** | **0** |
+
+   The 64-bit builds are at parity (no x87, ~310 vs ~334 SSE) because x86_64 mandates
+   SSE2. **Only our 32-bit PE code uses x87 — and x87 is the one thing Rosetta 2
+   emulates badly**, while it handles SSE well. A float-heavy audio mixer built with
+   x87, running translated, is exactly a 60× story.
+
+   Corroborating detail: with CrossOver's DLL the mixer sits in the **realtime band**
+   (`63R`); with ours it is `63T`. `server/thread.c` explains that — a thread that
+   violates the RT time-constraint policy is *demoted* out of the realtime band. Ours
+   spun, so the scheduler evicted it. The priority was a symptom, not a cause.
+
+   **This is not an audio bug. It affects every 32-bit PE DLL we build**, so it is a
+   candidate for the "rougher animation" too and for 32-bit performance generally.
+
+   **The fix, untested as of this writing:** `configure.ac:441` sets per-arch PE flags
+   from `${wine_arch}_CFLAGS`, defaulting to `${CROSSCFLAGS:-"-g -O2"}`. So pass
+
+   ```
+   i386_CFLAGS="-g -O2 -msse2 -mfpmath=sse"
+   ```
+
+   to configure (in `bin/build-runtime`), or use **clang** as the PE compiler, which is
+   what CrossOver's configure prefers (`configure.ac:430` checks for `clang`) and which
+   defaults to SSE2 for i686 where GCC defaults to x87. Our PE compiler is Homebrew
+   `i686-w64-mingw32-gcc (GCC) 16.1.0`. Nothing in CrossOver's *tree* requests SSE, so
+   they supply it from their build environment or get it from clang.
+
+   Verify a rebuild with:
+   ```sh
+   objdump -d runtimes/<rt>/lib/wine/i386-windows/dsound.dll | grep -cE '\b(mulss|mulps|addss|addps)\b'   # want >0
+   objdump -d runtimes/<rt>/lib/wine/i386-windows/dsound.dll | grep -cE '\b(fmul|fadd|fld)[a-z]*\b'        # want ~0
+   ```
+   and then the thread profile: healthy is ~100% total with `wine_dsound_mixer` near 0%.
+
+   `runtimes/winecx-26.3.0-cxdsound-x86_64` is the experiment that proved this — an APFS
+   clone with CrossOver's `dsound.dll` swapped in. Keep it as the control until the
+   rebuild is verified, then delete it; it is **not** a shippable configuration.
+   `runtimes/winecx-26.3.0-mt1015-x86_64` is the deployment-target experiment, which
+   **refuted** that hypothesis (mixer still spun at 99.2%); it can be deleted too.
+
+   ### ⚠️ Attempt 1 at the fix: clang for PE — right codegen, broken networking
+
+   `runtimes/winecx-26.3.0-clang-x86_64`, built with
+   `--with-mingw=/usr/local/opt/llvm/bin/clang`:
+
+   - **codegen fixed**: `120 SSE / 6 x87` in i386 `dsound.dll` (was `0 / 1334`).
+   - configure enabled clang-only features mingw-gcc never gave us:
+     `-fasync-exceptions`, `-ffp-exception-behavior=maytrap`, **`-fms-hotpatch`**
+     (proper MS hotpatchable entries — relevant, since Steam's overlay hot-patches
+     DLL entry points and that is implicated in the old WoW64 crash).
+   - **but Steam cannot log in.** It reaches the login screen and then retries
+     `EConnect` every 50 ms forever (`logs/connection_log.txt`), with **zero** TLS or
+     certificate errors, so it never gets as far as crypto — it looks like a
+     networking-layer regression (`ws2_32`/socket path) in the clang-built PE DLLs.
+     Unresolved; needs its own session.
+
+   One build-environment trap found on the way, worth keeping: Homebrew's llvm is
+   **keg-only**, so `llvm-dlltool` is not on `PATH` and every import library fails with
+   `winebuild: cannot find the 'dlltool' tool` — which reads like a missing package
+   rather than a `PATH` problem. `bin/env-build-x86_64.sh` now adds
+   `$BREW/opt/llvm/bin`. (`lld-link` *is* linked into `$BREW/bin` by the separate `lld`
+   formula, so linking is not the part that breaks.)
+
+   **So the recommended next step is `bin/build-runtime --winecx 26.3.0 --pe-gcc`**,
+   which keeps the toolchain that demonstrably works and changes only the float math
+   (`i386_CFLAGS=-g -O2 -msse2 -mfpmath=sse`). Verified in a smoke test: the same float
+   loop compiles to 7 SSE / 1 x87 with those flags versus 0 SSE / 5 x87 without. That
+   isolates the one variable that matters instead of swapping an entire toolchain.
+   Revisit clang separately — it is the better long-term answer (it is what CrossOver
+   and upstream prefer) but it is not a one-line change.
+
+   R-band counts match (5 either way), so audio threads *are* being placed in the
+   realtime band correctly — the jitter is not misplaced audio threads, it is a core
+   being eaten.
+
+   Getting the process right matters here: the virtual-desktop launch goes through
+   `start.exe`, and **`ps -M` and `ps -eo command` print different strings for that
+   wrapper**, so `grep -v start.exe` does not exclude it and two of these measurements
+   initially profiled a 0%-CPU wrapper. Select the busiest matching pid instead.
+
+   Useful negatives from the same session: the wineserver did **not** fail to set
+   thread QoS (`msync: error setting thread latency QoS` never appears; only
+   `msync: bootstrapped mach port` / `up and running`), and the mach thread-policy code
+   in `server/thread.c` is **identical in upstream 11.0 and CX**, gated only on
+   `#ifdef __APPLE__` — so it is compiled into our build too.
 
    ⚠️ **Do not repeat the "we burn twice the CPU" claim without matching phases** — the
    200% reading was taken during gameplay and the 101% at the menu, and at the menu

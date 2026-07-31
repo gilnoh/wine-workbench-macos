@@ -234,6 +234,37 @@ build if any soname comes out bare. The recipe below is kept because it document
 *why* each flag is there, and these traps each cost real time when they were
 rediscovered:
 
+- **⚠️ The PE compiler must emit SSE float math, not x87 — use clang.** Measured
+  2026-07-31, and it cost most of an evening. With Homebrew's
+  `i686-w64-mingw32-gcc`, our 32-bit PE DLLs compiled floating point to **x87**:
+
+  | `i386-windows/dsound.dll` | x87 | SSE |
+  | ------------------------- | --- | --- |
+  | CrossOver's shipped build | 52 | **741** |
+  | ours, mingw-gcc | **1334** | **0** |
+
+  **Rosetta 2 emulates x87 badly and SSE well.** The consequence was not a build
+  failure but a runtime that worked and was ~60x slower in float-heavy 32-bit code:
+  `wine_dsound_mixer` burned a whole core (100% vs 1.5% with CrossOver's DLL) and the
+  game's audio jittered audibly. GCC targeting i386 defaults to x87; clang targeting
+  `i686-windows` defaults to SSE. 64-bit PE builds are unaffected — x86_64 mandates
+  SSE2 — so this only ever bites 32-bit titles.
+
+  `bin/build-runtime` now passes `--with-mingw=/usr/local/opt/llvm/bin/clang`
+  (`configure.ac:414` accepts a path; `:466` derives `--target=i686-windows` itself),
+  falls back to mingw-gcc **plus `-msse2 -mfpmath=sse`** if clang is absent, records
+  `pe_compiler` in `PROVENANCE`, and **fails the build** if the i386 `dsound.dll` comes
+  out without SSE. Override with `PE_CC=`.
+
+  Check any runtime by hand:
+
+  ```sh
+  objdump -d runtimes/<rt>/lib/wine/i386-windows/dsound.dll | grep -cE '\b(mulss|mulps|addss|addps)\b'  # want >0
+  objdump -d runtimes/<rt>/lib/wine/i386-windows/dsound.dll | grep -cE '\b(fmul|fadd|fld)[a-z]*\b'      # want low
+  ```
+
+  Upstream Wine recommends clang + lld for PE builds; mingw-gcc is the less-tested
+  path, and this is what that costs. CrossOver's own configure prefers clang too.
 - **`gcc -m64` means *arm64* on Apple Silicon.** Build tools compiled this way
   silently mix architectures and the link fails with "found architecture arm64,
   required architecture x86_64". Always pass `CC="gcc -arch x86_64"` — **to

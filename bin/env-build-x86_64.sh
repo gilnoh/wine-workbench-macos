@@ -18,7 +18,16 @@ hash -r 2>/dev/null
 BREW=/usr/local
 
 # bison: system bison is 2.3, Wine needs 3.x
-export PATH="$BREW/opt/bison/bin:$BREW/bin:$PATH"
+#
+# llvm: needed when the PE build uses clang (which is the default -- see
+# bin/build-runtime, "the PE compiler"). Homebrew's llvm is **keg-only**, so its
+# bin dir is not linked into $BREW/bin and `llvm-dlltool` is invisible. winebuild
+# then fails every import library with
+#     winebuild: cannot find the 'dlltool' tool
+# which reads like a missing package rather than a PATH problem. (`lld-link` is
+# linked into $BREW/bin by the separate lld formula, so linking is not the part
+# that breaks.)
+export PATH="$BREW/opt/bison/bin:$BREW/opt/llvm/bin:$BREW/bin:$PATH"
 
 # mingw-w64 cross compilers for the PE-format Wine DLLs (--with-mingw).
 # Both i686- and x86_64- targets are needed for --enable-archs=i386,x86_64.
