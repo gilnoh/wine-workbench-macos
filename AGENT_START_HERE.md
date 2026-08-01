@@ -222,14 +222,21 @@ is deliberate:
 | --- | --- |
 | `vendor` | one commit per CrossOver release, **byte-identical** to `sources/wine` from that release's tarball |
 | `winecx-<cxver>` tags | the release points on `vendor` |
-| `main` | an orphan branch holding only a `README.md` — kept off `vendor` so the source stays pristine |
+| `main` | an orphan branch holding `README.md` + `add-release.sh` — kept off `vendor` so the source stays pristine |
 | others | work branches, based on a tag |
 
 Keeping `vendor` pristine is what makes a diff against it mean anything, and what stops
-our changes from silently becoming "the base". Upgrading to a new CrossOver release is
-therefore: extract the new tarball over the tree while on `vendor`, `git add -A`, commit
-with the tarball name and sha256 in the message, tag it, then rebase work branches onto
-the new tag. Releases share almost every file, so each one costs very little history.
+our changes from silently becoming "the base". Upgrading is scripted — `add-release.sh` on
+the `main` branch downloads a release, records its sha256, replaces the tree wholesale,
+commits and tags, then reports how many files changed since the previous tag:
+
+```sh
+git -C src/crossover/sources/wine show main:add-release.sh > /tmp/add-release.sh
+chmod +x /tmp/add-release.sh && /tmp/add-release.sh 26.4.0 src/crossover/sources/wine
+```
+
+Then rebase work branches onto the new tag. Releases share almost every file, so each one
+costs very little history.
 
 That repository is **local-only and not published**. It is a convenience: the tarball is a
 public download and every runtime's `PROVENANCE` records its sha256, so reproducibility
