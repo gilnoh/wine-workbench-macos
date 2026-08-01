@@ -213,6 +213,37 @@ it is the best possible outcome.
 
 ---
 
+## A built tree is not relocatable
+
+Building bakes absolute paths in. `configure` is seeded with absolute soname paths so
+that Wine's `dlopen`s resolve without any environment (`RUNTIME.md` §1), which means the
+runtime contains lines like:
+
+```
+#define SONAME_LIBVULKAN "/abs/path/runtimes/<name>/lib/bundled/libvulkan.1.dylib"
+```
+
+Move or rename the checkout and those paths stop resolving — **silently**, in exactly the
+way the bundling design exists to prevent: no error, just no Vulkan, no fonts, no TLS.
+Prefixes have the same issue: `dosdevices/s:` is an absolute symlink to `library/`, and
+`build/` trees hold absolute `srcdir`/`prefix`.
+
+Cloning to a new machine or path is fine — you build there, so the paths are correct.
+It is *moving an existing built tree* that breaks. If you must:
+
+```sh
+ln -s /new/path /old/path        # 1. compatibility symlink: everything keeps resolving
+ln -sfn /new/path/library /new/path/prefixes/<pfx>/dosdevices/s:   # 2. repoint prefixes
+bin/build-runtime --winecx <VER> --pe-gcc --force                  # 3. rebuild at leisure
+```
+
+After the rebuild the old paths are gone from the runtime and the compatibility symlink
+can be removed. Verify with:
+
+```sh
+grep -E '^#define SONAME_LIB' build/<name>/include/config.h    # must point at the NEW path
+```
+
 ## Things not to do
 
 - **Do not set `DYLD_FALLBACK_LIBRARY_PATH` to fix a missing library.** It masks a
