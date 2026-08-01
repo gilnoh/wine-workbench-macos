@@ -337,6 +337,11 @@ EOF
 chmod +x "$build_script"
 
 info "building $NAME (jobs=$JOBS) -- this takes a while"
+# build/ is gitignored, so it does not exist in a fresh clone. The build script
+# creates $BUILD itself, but that runs *after* this redirect opens the log inside
+# build/ -- so a clean checkout failed here, twenty minutes of work short of the
+# first line of output.
+mkdir -p "$GAMES_ROOT/build" || die "cannot create $GAMES_ROOT/build"
 log="$GAMES_ROOT/build/$NAME-build.log"
 arch -x86_64 /bin/zsh "$build_script" > "$log" 2>&1
 grep -q BUILD_OK "$log" || die "build failed -- see $log
