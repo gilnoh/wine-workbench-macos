@@ -319,10 +319,22 @@ with arm64 objects.
 ## 5. Prefixes
 
 `bin/mkprefix <name>` creates one, mounts `S:`, and provisions corefonts +
-`d3dcompiler_47` via a pinned winetricks (plus Wine Mono when the runtime has it).
-`--no-provision` skips the winetricks step. **It has never been run end to end** —
-`steam-base` predates it and was provisioned by hand — so expect to debug it the
-first time. Note it does **not** install Steam; that is still manual.
+`d3dcompiler_47` via a pinned winetricks, then Wine Mono from the runtime's
+`share/wine/mono/`. `--no-provision` skips the whole provisioning step. It does
+**not** install Steam; that is still manual, and mounting `S:` is not the same as
+registering it as a Steam library folder — see `bin/mkprefix`'s own header.
+
+**Run `bin/get-addons <runtime>` before `mkprefix`**, or there is no Mono MSI to
+install. A source build ships none.
+
+Measured end to end for the first time on 2026-08-01 (WineCX 26.3.0, wb-test):
+31 fonts, Wine Mono 10.4.1, `S:` resolving. Note what an unprovisioned prefix
+looks like, because it is not what the name suggests: `C:\windows\Fonts` is
+**empty** — zero files, confirmed through Wine, not just on disk. Wine's own 56
+stock fonts (`tahoma.ttf`, `symbol.ttf`, `marlett.ttf`, the `.fon` bitmaps …)
+live in the *runtime's* `share/wine/fonts/` and are never copied into a prefix.
+So a font count taken inside a prefix measures provisioning only, which is what
+makes it a usable check.
 
 The manual equivalent, for reference (fetch winetricks with `bin/get-winetricks`):
 
@@ -416,7 +428,27 @@ which looks exactly like the game being incompatible rather than an addon being
 absent. Steam's `console_log.txt` showed the tell: `Game process added` followed
 by `Game process removed` two seconds later.
 
-`bin/mkprefix` installs Mono into new prefixes when the runtime has it.
+`bin/mkprefix` installs Mono into new prefixes when the runtime has it. **This
+sentence was false from the day it was written until 2026-08-01**, and it is worth
+knowing why, because the shape recurs.
+
+The lookup built its path as `"$(dirname "$BIN")/../share/wine/mono/"`. `$BIN` is
+already `runtimes/<rt>/bin`, so that resolved one level too high —
+`runtimes/share/wine/mono/` — and never matched an MSI that was sitting exactly
+where `get-addons` had put it. The miss was then *fatal and silent*: `common.sh`
+sets `set -eo pipefail`, so the empty `ls` at the head of
+`mono_msi=$(ls <glob> 2>/dev/null | head -1)` exited 1, pipefail carried that past
+the successful `head`, and `set -e` killed the script on the assignment. With
+`2>/dev/null` swallowing the message, `mkprefix` simply stopped after "fonts
+installed", printing no error and never reaching `prefix ready`.
+
+The `else` branch immediately below the lookup exists to warn *"no wine-mono in
+the runtime — run bin/get-addons"*. It was unreachable in precisely the case it
+was written for: **a guard that can only fire when it is not needed.**
+
+Fixed by naming the runtime root once (`RT_ROOT`) and replacing the pipeline with
+a glob loop, which cannot fail under `set -e` and so keeps the branch reachable.
+See the pipeline-exit-code rule in `AGENT_START_HERE.md`.
 
 ## 9. Launching Steam games
 
