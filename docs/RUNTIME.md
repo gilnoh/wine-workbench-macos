@@ -336,6 +336,58 @@ live in the *runtime's* `share/wine/fonts/` and are never copied into a prefix.
 So a font count taken inside a prefix measures provisioning only, which is what
 makes it a usable check.
 
+### Verifying a prefix
+
+Two checks that can actually fail, and the traps around them.
+
+**Pairing — is this prefix the one that runtime booted?** `wineboot` copies the
+runtime's PE builtins into the prefix, so their hashes match:
+
+```sh
+shasum -a 256 runtimes/<rt>/lib/wine/x86_64-windows/ntdll.dll \
+              prefixes/<pfx>/drive_c/windows/system32/ntdll.dll   # must be equal
+shasum -a 256 runtimes/<rt>/lib/wine/i386-windows/ntdll.dll \
+              prefixes/<pfx>/drive_c/windows/syswow64/ntdll.dll   # and this pair
+```
+
+⚠️ **`wine --version` does not test this.** It reports what that binary is and
+short-circuits before opening a prefix, so it passes identically against a prefix
+built by a completely different Wine. Keep `PROVENANCE` alongside the hashes and
+the chain is source → runtime → prefix, each link checkable.
+
+**`S:` — is the mount real?** A dangling `dosdevices/s:` is the failure this
+project keeps meeting: `ln -sfn` to a missing target succeeds, `ls -l` on the
+result exits 0 and prints a normal-looking line, and only dereferencing fails.
+
+⚠️ **Correcting an earlier claim of ours** (commit `de7ed14`) that
+`wine cmd /c dir S:\` is "the meaningful check". It discriminates, but it does
+**not** fail loudly, and the difference matters. Measured on WineCX 26.3.0:
+
+| | good `s:` | dangling `s:` |
+| - | --------- | ------------- |
+| `dir S:\` output | volume header **+ file entries** | volume header, **no entries** |
+| wine process exit status | 0 | **1** |
+| `ls -l dosdevices/s:` | 0 | **0** — cannot fail |
+
+So `dir S:\` on a broken mount still prints `Volume in drive S has no label` and
+`Directory of S:` with no error text at all. Glance at the header and it looks
+mounted. Use the process exit status, or better:
+
+```sh
+wine cmd /c 'if exist S:\<known-file> (echo FOUND) else (echo MISSING)'
+```
+
+⚠️ And do **not** reach for `%errorlevel%` to check it. Measured: `dir S:\ >nul
+2>&1 & echo %errorlevel%` prints `0` for both the good and the dangling case,
+because `cmd` expands `%errorlevel%` when it *parses* the compound statement,
+before `dir` has run. That is another control that cannot fail — the same family
+as the pipeline exit-code trap in `AGENT_START_HERE.md`.
+
+Finally, if you break `s:` deliberately to run this control, restore it from a
+shell `trap` on `EXIT INT TERM` and re-assert the positive case afterwards. An
+interrupted negative control leaves a working prefix broken, and the damage
+outlives the test — that has already happened here once, under build load.
+
 The manual equivalent, for reference (fetch winetricks with `bin/get-winetricks`):
 
 ```sh
