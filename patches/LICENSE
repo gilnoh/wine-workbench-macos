@@ -1,0 +1,43 @@
+# Licensing of the patches in this directory
+
+SPDX-License-Identifier: LGPL-2.1-or-later
+
+Every `*.patch` file here modifies Wine source code, so each is a derivative work
+of Wine and is licensed under the **GNU Lesser General Public License, version 2.1
+or (at your option) any later version** — the same terms as Wine itself.
+
+That is deliberate, not incidental: it is what allows these changes to be sent to
+the Wine project or to CodeWeavers, and combined with Wine or with CrossOver's
+published Wine sources, without a licence conflict.
+
+The canonical LGPL-2.1 text is not duplicated here. It ships with Wine as
+`COPYING.LIB` in any Wine source tree (including CodeWeavers' published
+`crossover-sources-*.tar.gz`), and is published at
+<https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html>.
+
+The MIT licence in the repository root applies to the tooling (`bin/`, `tools/`,
+`docs/`, `profiles/`) and explicitly does **not** apply to this directory.
+
+## Third-party material in this directory
+
+Two files are **not our work**. They are diffs of CodeWeavers' published CrossOver
+Wine sources, kept here as reference material while investigating differences
+between that tree and upstream Wine:
+
+- `crossover26-wined3d.diff`
+- `crossover26-winemac.drv.diff`
+
+They are Copyright © CodeWeavers, Inc. and contributors, LGPL-2.1-or-later, and
+are redistributed here under those terms. Do not treat them as changes authored by
+this project, and do not assume the MIT licence covers them.
+
+`dxmt-0001-include-iomanip.patch` modifies DXMT, which carries its own licence;
+see that project.
+
+## Subdirectories
+
+- `retracted/` — patches that were **wrong** and were replaced by a better
+  approach. Kept so the mistake is visible. Same LGPL terms.
+- `superseded/` — patches that were **right** but are no longer needed, because the
+  base (CrossOver's Wine) already carries the fix. Same LGPL terms. Three of them
+  are ports of CodeWeavers' own hacks and are credited as such in that README.

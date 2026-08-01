@@ -90,14 +90,25 @@ if [ "$MODE" = winecx ]; then
     CX_INSTALLED="${CX_INSTALLED:-none}"
     case "$CX_INSTALLED" in
         "$CXVER"*) : ;;                          # 26.3.0.39794 matches 26.3.0
+        none)
+            # No CrossOver at all: perfectly buildable -- CodeWeavers publish these
+            # sources under the LGPL and they need nothing from the app. You only
+            # lose the A/B reference, so say so plainly and carry on. (A *mismatch*
+            # is different: it makes every comparison silently lie, so it still stops
+            # the build.)
+            info "WARNING: CrossOver.app is not installed."
+            info "         The runtime will build and run, but the A/B reference that"
+            info "         produced most findings in this project is unavailable."
+            info "         See docs/NEXT.md for what that method is worth." ;;
         *) if [ "$ALLOW_CX_MISMATCH" = 1 ]; then
                info "WARNING: installed CrossOver is $CX_INSTALLED, source is $CXVER"
                info "         the bottle reference will not match this runtime"
            else
                die "installed CrossOver ($CX_INSTALLED) does not match --winecx $CXVER
-  The A/B reference against a CrossOver bottle only means anything when the two
-  agree; see docs/NEXT.md, 'The pivot'. Upgrade one of them, or pass
-  --allow-cx-mismatch to build anyway (it is recorded in PROVENANCE)."
+  A version-matched CrossOver is the reference every comparison here is measured
+  against; when the two disagree it lies silently. Upgrade one of them, or pass
+  --allow-cx-mismatch to build anyway (it is recorded in PROVENANCE).
+  Note: having NO CrossOver installed is fine and only warns."
            fi ;;
     esac
 else
