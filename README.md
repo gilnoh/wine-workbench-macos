@@ -1,4 +1,4 @@
-# games — a Wine workbench for macOS on Apple Silicon
+# wine-workbench-macos
 
 **Play your favourite Windows games on a Mac — and hack on the thing that runs them
 while you do.**
@@ -16,10 +16,36 @@ The split of intent is roughly:
   here is written down in a form someone else can use — and the pieces worth
   contributing go outward, to Wine or to CodeWeavers.
 
-The longer-term target is a macOS-specific graphics module — a `wine_mesa_gl`: something
-that gives Wine a modern OpenGL path on macOS instead of the deprecated CGL one, which
-caps out at GL 4.1. There are games that need exactly that; **Task Force Admiral**, a
-GL-only title, is the example driving it here.
+## Why this exists
+
+If every game just worked, none of this would be needed. Some do not — so the question
+becomes *why*, and answering that repeatedly ran into the same wall.
+
+One of those investigations went like this. A game would not run; the reason turned out
+to be OpenGL; and macOS OpenGL is a dead end — deprecated, and capped at GL 4.1 through
+CGL. So a bridge was written: **`wine_mesa_gl`**, routing GL through Mesa (zink) to
+Vulkan to Metal. It works. It runs today, with rough edges, as its own project.
+
+The idea was never the problem. Everything around it was:
+
+- **No good way to distribute it.** It was built against one machine's particular state,
+  and "works on mine" is not something you can hand to anyone else.
+- **It criss-crossed with CrossOver, whose Wine source was not on hand.** Developing a
+  Wine module against a Wine binary you cannot rebuild makes the important question — is
+  this my bug, their patch, or a build difference? — unanswerable. You end up guessing,
+  and guesses in this domain are expensive.
+- **Nothing was reproducible.** No recorded provenance, no patch series, no way to build
+  the same thing twice or to find where a regression crept in.
+
+So this repository is the *frame* that work should have had: build Wine from source you
+actually possess, keep every change as a patch with its reason attached, keep a
+version-matched reference to compare against, and make the result reproducible from a
+clean checkout.
+
+`wine_mesa_gl` is the **first** such case, not the destination. The expectation is more
+of them, each starting the same way — a game that does not work, and a question that
+deserves a real answer instead of a guess. **Task Force Admiral**, a GL-only title, is
+the example driving the graphics side.
 
 ## Scope
 
