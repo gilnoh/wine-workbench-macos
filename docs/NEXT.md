@@ -1,8 +1,45 @@
 # Continue here
 
-> **New session?** Start with **`docs/START-HERE-NEXT-SESSION.md`** — it is the
-> orientation brief: the goal, what is already settled, the three traps that will
-> bite you, and how to work in this repo. Then come back here for the detail.
+> **New session?** Read `README.md` for what this project is, then
+> `AGENT_START_HERE.md` for how to operate it — both are durable and do not change.
+> **This file is the only one that tracks current state**, so it is where anything
+> time-varying belongs: what is working now, what is open, and what has been refuted.
+
+## Current state (2026-08-01)
+
+- **Runtime:** `runtimes/winecx-26.3.0-sse-x86_64` — WineCX 26.3.0 (CrossOver 26.3.0 =
+  Wine 11.0), built with `--pe-gcc`. It is `DEFAULT_RUNTIME` and is named in every
+  profile. Built from `src/crossover/sources/wine`, which is its own git repo: pristine
+  tarball on branch `vendor` at tag `winecx-26.3.0`, our work on `games`.
+- **Prefix:** `prefixes/steam-winecx`, an APFS clone of `steam-base` with `wineboot -u`
+  run on it — which preserved the Steam login and the `S:` library registration, the two
+  steps only a human can redo.
+- **Patches:** `wine-0004` (`workaround`; this base needs it) and `wine-0005` (`debug`).
+  The four ports of CodeWeavers' hacks are in `patches/superseded/`.
+- **Fallback:** `wine-11.14-x86_64` + `steam-base` still work, untouched, one environment
+  variable away: `RUNTIME=wine-11.14-x86_64 PREFIX=steam-base bin/gamerun steam`.
+- **Also on disk:** `winecx-26.3.0-clang-x86_64` and its build tree, kept deliberately —
+  its Steam-login regression is unresolved and debugging it should not need a rebuild.
+
+**Working:** Steam renders and logs in; Strategic Command WWII reaches its menu with
+real-time menu response, clean audio and smooth loading, and plays a turn.
+
+**Open, in rough order:**
+
+1. **The 2 s → 20 s menu fade** — the last known symptom. Re-measure on the current build
+   before theorising; loading got smoother with the x87 fix, so this may have gone with
+   it.
+2. **clang as the PE compiler** — the better long-term toolchain (CrossOver's and
+   upstream's choice; brings `-fms-hotpatch`), blocked on a Steam-login regression:
+   `EConnect` retried every 50 ms with zero TLS errors.
+3. **The other two games** — Quasimorph, Battleship Command. Both 64-bit, so untouched by
+   the x87 problem and by all the 32-bit work. Never tried; they may just work.
+4. **The SDL2/`winebus` crash** (`RUNTIME.md` §1) — gamepads do not work, and every
+   prefix bring-up logs an alarming, unrelated-looking exception.
+5. **`bin/mkprefix` has still never run end to end**; installing Steam into a prefix is
+   manual.
+6. **Why CEF runs its GPU in-process under CrossOver and not for us** — reopened, see
+   `RUNTIME.md` §2.
 
 ## ⚠️ THE PIVOT — read this before anything else (decided 2026-07-30)
 
