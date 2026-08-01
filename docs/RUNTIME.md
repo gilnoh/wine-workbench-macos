@@ -229,10 +229,21 @@ Run `bin/provision-host` on a clean machine. It is idempotent and has a
 ## 4. Building the runtime
 
 **`bin/build-runtime` does this** — it configures, applies `patches/series`
-(skipping class `debug` unless `--with-debug`), builds and installs, and fails the
-build if any soname comes out bare. The recipe below is kept because it documents
-*why* each flag is there, and these traps each cost real time when they were
-rediscovered:
+(skipping class `debug` unless `--with-debug`), builds, installs, and writes a
+`PROVENANCE` file. It **fails the build** rather than shipping a silently-wrong
+runtime when:
+
+| check | the failure it prevents |
+| ----- | ----------------------- |
+| any soname comes out bare | no vulkan/freetype/gnutls, looking like app bugs (§1) |
+| i386 PE float math is x87, not SSE | ~60x slower float code under Rosetta (below) |
+| the source tree is not a git repo at its own root | `git apply` skips every hunk and exits 0 — an unpatched runtime that looks patched |
+| the tree differs from its tag by anything outside `patches/series` | changes that vanish on a clean rebuild |
+| `--winecx <ver>` disagrees with the installed CrossOver | an A/B reference that quietly lies |
+| `PROVENANCE` is missing a field | an unlabelled runtime |
+
+The recipe below is kept because it documents *why* each flag is there, and these
+traps each cost real time when they were rediscovered:
 
 - **⚠️ The PE compiler must emit SSE float math, not x87 — use clang.** Measured
   2026-07-31, and it cost most of an evening. With Homebrew's
@@ -279,9 +290,15 @@ rediscovered:
 
 ```
 --build=x86_64-apple-darwin --enable-archs=i386,x86_64
---prefix=<runtimes/wine-VERSION-x86_64> --disable-tests
---with-vulkan --with-mingw --with-freetype --with-gnutls --without-x
+--prefix=<runtimes/NAME> --disable-tests
+--with-vulkan --with-freetype --with-gnutls --without-x
+--with-mingw=/usr/local/opt/llvm/bin/clang        # or, with --pe-gcc:
+--with-mingw  i386_CFLAGS='-g -O2 -msse2 -mfpmath=sse'
 ```
+
+  plus `ac_cv_lib_soname_*=<absolute path into lib/bundled>` for each bundled
+  library (§1). The exact line used for a given runtime is recorded in its
+  `PROVENANCE`, along with `pe_compiler` and `deployment_target`.
 
 Apply the patches listed in `patches/series` (skip class `debug`), then build.
 Only the touched module needs rebuilding, e.g.

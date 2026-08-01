@@ -1,8 +1,23 @@
 #!/bin/bash
 # Build a Wine runtime from source with our patches applied.
 #
-#   bin/build-runtime --winecx 26.3.0 [--jobs 8] [--with-debug] [--force]
-#   bin/build-runtime [--version 11.14] [--jobs 8] [--with-debug] [--force]
+#   bin/build-runtime --winecx 26.3.0 [options]
+#   bin/build-runtime [--version 11.14] [options]
+#
+# Options:
+#   --jobs N              parallel make jobs (default 8)
+#   --with-debug          also apply class 'debug' patches from patches/series
+#   --force               build over an existing runtime (also needed after a
+#                         FAILED build, which leaves the directory behind)
+#   --src DIR             use this source tree instead of the mode's default
+#   --name NAME           output runtimes/NAME instead of the derived name
+#   --allow-cx-mismatch   build even when CrossOver.app disagrees with --winecx
+#   --pe-gcc              use mingw-gcc for the PE build (with SSE math forced)
+#                         instead of clang -- see "the PE compiler" below
+#
+# Environment: PE_CC=<compiler> overrides the PE compiler entirely;
+#              MACOSX_DEPLOYMENT_TARGET is honoured and recorded;
+#              WINECX_SRC overrides the WineCX source tree.
 #
 # Two modes:
 #
@@ -35,6 +50,7 @@ JOBS=8
 WITH_DEBUG=0
 FORCE=0
 ALLOW_CX_MISMATCH=0
+PE_GCC=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --winecx)  MODE=winecx; CXVER="$2"; shift 2 ;;

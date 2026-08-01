@@ -594,11 +594,10 @@ reaches its menu, menus respond in **real time**, and a turn plays.
   `wine-0008` (= 24834). They are still needed to reproduce the upstream fallback
   runtime `wine-11.14-x86_64`, whose source tree `src/wine` has all four applied —
   which is why `src/wine` is deliberately left dirty rather than reset.
-- **Watch out:** `runtimes/wine-cx26.3-x86_64` has **zero bundled libs**, so it is
-  not a usable runtime and never was — `RUNTIME.md` §1's work must be applied to any
-  CX-based runtime or you silently lose freetype/vulkan/gnutls. (It is *not* misnamed;
-  an earlier note claiming that was wrong. It is superseded by
-  `runtimes/winecx-26.3.0-x86_64` and can be deleted once that one is proven.)
+- **Watch out:** the first CX-based runtime here (`wine-cx26.3-x86_64`, since deleted)
+  had **zero bundled libs** and so was never usable — `RUNTIME.md` §1's work must be
+  applied to any CX-based runtime or you silently lose freetype/vulkan/gnutls. (It was
+  *not* misnamed; an earlier note claiming that was wrong.)
 
 ---
 
@@ -833,29 +832,28 @@ poked into `code_buffer` at runtime by `BTCpuProcessInit`, living in `.data`. On
 the 64→32 `lretq` half is visible in `.text`. That is part of why a static compare
 of the two shipped DLLs looked like "no relevant difference".
 
-`runtimes/wine-cx26.3-x86_64` (already built from their source) contains the
-workaround, so it can smoke-test the diagnosis without a rebuild — but **do not
-point it at `prefixes/steam-base`**; an 11.14 → 11.0 downgrade risks a prefix that
-took hours to provision. Use a throwaway `bin/mkprefix` prefix.
+(Historical note: that section suggested smoke-testing against
+`runtimes/wine-cx26.3-x86_64`. That runtime is deleted, and the whole question is
+moot — the WoW64 workaround comes from the base now.)
 
 ## Next actions, in order
 
 **0. THE PIVOT — LANDED 2026-07-31.** The runtime is
-`runtimes/winecx-26.3.0-x86_64` (WineCX 26.3.0 = CrossOver 26.3.0 = Wine 11.0), built
-by `bin/build-runtime --winecx 26.3.0`, prefix `prefixes/steam-winecx`. Steam renders
+`runtimes/winecx-26.3.0-sse-x86_64` (WineCX 26.3.0 = CrossOver 26.3.0 = Wine 11.0),
+built by `bin/build-runtime --winecx 26.3.0 --pe-gcc`, prefix `prefixes/steam-winecx`.
+Both are now the defaults, so no environment overrides are needed. Steam renders
 and logs in; Strategic Command reaches its menu with real-time menus and plays a turn.
 `patches/series` carries exactly **one** functional delta of ours (`wine-0004`) plus a
 `debug` patch — down from four ports of CodeWeavers' hacks.
 
 Launch it with:
 ```sh
-RUNTIME=winecx-26.3.0-x86_64 PREFIX=steam-winecx bin/gamerun steam
-RUNTIME=winecx-26.3.0-x86_64 PREFIX=steam-winecx bin/gamerun strategic-command
+bin/gamerun steam
+bin/gamerun strategic-command
+RUNTIME=wine-11.14-x86_64 PREFIX=steam-base bin/gamerun steam   # the old build, for A/B
 ```
-(`RUNTIME`/`BACKEND`/`PREFIX` in the environment now override a profile, so the old
-`wine-11.14-x86_64` + `steam-base` combination is still one command away for A/B.
-The profiles themselves still name the old runtime — switch them once msync and the
-audio regression are settled.)
+(`RUNTIME`/`BACKEND`/`PREFIX` in the environment override a profile, which is how the
+runtime comparisons in this document were run.)
 
 Read "THE REBUILD" above for what each step actually produced, then Step 7 for what is
 open. The next thing to try is **`WINEMSYNC=1`**.
