@@ -41,27 +41,52 @@
 **Working:** Steam renders and logs in; Strategic Command WWII reaches its menu with
 real-time menu response, clean audio and smooth loading, and plays a turn.
 
-**Open, in rough order:**
+## Next: the four directions on the table
 
-1. **The 2 s → 20 s menu fade** — the last known symptom. Re-measure on the current build
-   before theorising; loading got smoother with the x87 fix, so this may have gone with
-   it.
-2. **clang as the PE compiler** — the better long-term toolchain (CrossOver's and
-   upstream's choice; brings `-fms-hotpatch`), blocked on a Steam-login regression:
-   `EConnect` retried every 50 ms with zero TLS errors.
-3. **The other two games** — Quasimorph, Battleship Command. Both 64-bit, so untouched by
-   the x87 problem and by all the 32-bit work. Never tried; they may just work.
-4. **The SDL2/`winebus` crash** (`RUNTIME.md` §1) — gamepads do not work, and every
-   prefix bring-up logs an alarming, unrelated-looking exception.
-5. ~~**`bin/mkprefix` has still never run end to end**~~ — **CLOSED 2026-08-01.** It
-   now does, verified in the `wb-test` checkout on WineCX 26.3.0: 31 fonts, Wine Mono
-   10.4.1, `S:` resolving, `prefix ready` reached, real exit status 0. It took two
-   bug fixes to get there — the Mono lookup had never worked since it was written
-   (`RUNTIME.md` §8) — so "never run end to end" turned out to mean "was broken and
-   nobody had found out". Installing Steam into a prefix is still manual, and so is
-   registering `S:` as a Steam library folder.
-6. **Why CEF runs its GPU in-process under CrossOver and not for us** — reopened, see
-   `RUNTIME.md` §2.
+Chosen for the next session: **the other two games** (3). Everything here is a live
+option, not a backlog — pick by what you want to learn.
+
+**1. Play Strategic Command and polish.** The environment works; find the remaining minor
+issues. Cheap, and it carries a free measurement with it: **the 2 s → 20 s menu fade is
+still unmeasured on the current build**. Loading got smoother when the x87 float bug was
+fixed, so the fade may have gone with it. Re-measure before theorising — that is the last
+known symptom from the WineCX rebase.
+
+**2. Controller support / the SDL2 `winebus` crash** (`RUNTIME.md` §1). Gamepads do not
+work: `winebus` dlopens our bundled `libSDL2` from a worker thread, SDL2's dyld
+initializer touches `NSWindow`, macOS 26 turns that into a hard exception, and the service
+dies with `1053`. Well-scoped, and there is a **reference oracle** — check whether
+gamepads work in the CrossOver bottle. If they do, their build avoids it and the
+difference is findable. Unlocks a class of games (Sekiro and similar).
+
+**3. ▶ NEXT — Quasimorph and Battleship Command.** Both 64-bit Unity/D3D11, so **DXMT
+territory**: they do not go near WoW64, GDI, dsound or any 32-bit path this project has
+worked on. About an hour to try, and the highest information per hour on this list —
+either the base generalises to a completely different code path, or the next class of
+problem surfaces cheaply. `backends/dxmt-0.80` is already built and unused so far.
+
+**4. Task Force Admiral + `wine_mesa_gl`.** The reason the workbench exists. The bridge
+(GL → Mesa/zink → Vulkan → Metal) already runs with rough edges as its own project; what
+stalled it was having no distributable frame, no CrossOver source to build against, and no
+reproducibility — all three of which now exist and have been tested by a clean checkout.
+Rebuilding it on this base is the thing that converts the workbench from plausible to
+proven. Expect real work: the winemac.drv side has to be re-derived against CrossOver's
+tree rather than upstream 11.2, and there is a known unsolved issue at the end (Metal
+texture-view sampling, which forced post-processing off).
+
+**Also open, smaller:**
+
+- **clang as the PE compiler** — the better long-term toolchain (CrossOver's and
+  upstream's choice; brings `-fms-hotpatch`), blocked on a Steam-login regression:
+  `EConnect` retried every 50 ms with zero TLS errors. Rebuild that runtime to debug it.
+- **Why CEF runs its GPU in-process under CrossOver and not for us** — reopened; see
+  `RUNTIME.md` §2. Closing it would delete `wine-0004` and leave zero functional patches.
+- **Installing Steam into a prefix is still manual**, as is registering `S:` in the
+  client. `bin/mkprefix` itself now runs end to end (verified 2026-08-01).
+
+**Not a target: upstreaming to Wine.** CodeWeavers is the audience; if CrossOver already
+carries a hack for something, there is nothing to report. See `AGENT_START_HERE.md`,
+"Contributing outward".
 
 ## ⚠️ THE PIVOT — read this before anything else (decided 2026-07-30)
 

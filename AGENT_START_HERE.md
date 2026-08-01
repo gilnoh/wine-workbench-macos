@@ -232,12 +232,22 @@ address.
   into a stated finding and misled the next reader for an entire session. Record
   observations freely; defer conclusions until the question is closed.
 
-### Contributing outward
+### Contributing outward — CodeWeavers, not upstream
 
-Patches are LGPL-2.1-or-later (see `patches/LICENSE`) precisely so they can go to the
-Wine project or to CodeWeavers unchanged. When a `fix`-class patch is genuinely
-upstreamable, that is the goal — deleting it from `patches/series` because upstream took
-it is the best possible outcome.
+Patches are LGPL-2.1-or-later (see `patches/LICENSE`) so they *can* go to either the Wine
+project or CodeWeavers unchanged. But the default audience is **CodeWeavers**, not
+wine-devel: this is a macOS workbench built on their tree, and they are one of Wine's
+major contributors, so what they know upstream effectively knows.
+
+Before proposing to report anything, check whether CrossOver already handles it:
+
+```sh
+grep -rn 'CW HACK\|CX HACK' src/crossover/sources/wine/
+```
+
+If they carry a hack for it, or deliberately took another path, **there is nothing to
+report** — record it in `docs/` and stop. Do not reflexively suggest upstreaming; that is
+optimising for a virtue this project does not need.
 
 ---
 
