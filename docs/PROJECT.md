@@ -395,7 +395,7 @@ prefix; formalise via winetricks `d3dcompiler_47`.
 
 ## Related work on this machine
 
-- `/Users/<user>/progs/mesa_gl_to_metal` — Mesa (zink + kosmickrisp) +
+- `~/progs/mesa_gl_to_metal` — Mesa (zink + kosmickrisp) +
   `libmesa_wine.dylib` GL bridge + patched `winemac.drv`, Wine 11.2. Shelved
   mid-investigation (Metal texture-view sampling returns zeros, blocking
   `applyLut()`). In scope to return to; it is the OpenGL backend for this tree.

@@ -61,7 +61,7 @@ deliverable.
 | Translation | Rosetta 2 (`/Library/Apple/usr/libexec/oah` present). All Wine code is x86_64 and therefore **translated**. |
 | Our Wine | `wine-11.14`, upstream source, at `runtimes/wine-11.14-x86_64` |
 | Reference | CrossOver 26.0.0 (`cxoffice-26.0.0rc2`), whose bundled Wine reports `wine-11.0` |
-| Repo root | `/Users/<user>/games` |
+| Repo root | the checkout (paths below are relative to it) |
 
 Our configure line (from `bin/build-runtime`, which reproduces the runtime from
 a clean checkout):
@@ -314,7 +314,7 @@ them.
 ## 9. Reproduction
 
 ```sh
-cd /Users/<user>/games
+cd <repo root>
 bin/killwine --deep
 
 bin/gamerun steam &                 # wait for login; ~20 s, watch:

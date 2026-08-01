@@ -16,10 +16,17 @@
   steps only a human can redo.
 - **Patches:** `wine-0004` (`workaround`; this base needs it) and `wine-0005` (`debug`).
   The four ports of CodeWeavers' hacks are in `patches/superseded/`.
-- **Fallback:** `wine-11.14-x86_64` + `steam-base` still work, untouched, one environment
-  variable away: `RUNTIME=wine-11.14-x86_64 PREFIX=steam-base bin/gamerun steam`.
-- **Also on disk:** `winecx-26.3.0-clang-x86_64` and its build tree, kept deliberately —
-  its Steam-login regression is unresolved and debugging it should not need a rebuild.
+- **One runtime, one prefix.** The upstream `wine-11.14-x86_64` fallback, the
+  `winecx-26.3.0-clang-x86_64` experiment, the degraded `wine-11.0-x86_64`, and the
+  `steam-base` / `steam-cxbuild` / `steam-cxtest` prefixes were all deleted on
+  2026-08-01 (~21 GB) when the checkout was renamed to `wine-workbench-macos`: each had
+  the old absolute path baked in, and a stale one fails *silently* (no Vulkan, no fonts,
+  no TLS). Rebuilding beats carrying them.
+  - upstream 11.14 is reproducible from `src/wine` **plus** restoring
+    `wine-0006/0007/0008` from `patches/superseded/` into a series — it is not a
+    one-command rebuild, which is the main reason to think twice before wanting it back.
+  - the clang runtime is one documented command (see the clang section below) plus
+    ~25 minutes.
 
 **Working:** Steam renders and logs in; Strategic Command WWII reaches its menu with
 real-time menu response, clean audio and smooth loading, and plays a turn.
@@ -550,8 +557,8 @@ reaches its menu, menus respond in **real time**, and a turn plays.
      loading-smoothness improvement suggests the fade may have been x87 as well.
    - **clang** remains the better long-term PE toolchain (it is what CrossOver and
      upstream prefer, and it brings `-fms-hotpatch`); its Steam-login regression is the
-     blocker. `runtimes/winecx-26.3.0-clang-x86_64` and its build tree are kept so this
-     can be debugged without a 25-minute rebuild.
+     blocker. That runtime has since been deleted (stale absolute paths after the
+     rename); rebuild it with `--pe-cc`/`--with-mingw=<clang>` when picking this up.
    - **the runtime name** still carries a `-sse` suffix, which is historical now that
      `build-runtime` guarantees and asserts SSE for every build. A future rebuild can
      drop it; renaming the directory in place is not safe.

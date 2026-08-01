@@ -5,7 +5,11 @@
 # array trips "unbound variable". The env arrays below are routinely empty.
 set -eo pipefail
 
-GAMES_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# `pwd -P`, not `pwd`: resolve symlinks to the physical path. Building bakes this path
+# into the runtime (absolute soname paths, docs/RUNTIME.md §1), so a build launched
+# through a symlinked checkout would bake the *symlink* path and break silently on the
+# day that symlink goes away.
+GAMES_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 export GAMES_ROOT
 
 RUNTIMES_DIR="$GAMES_ROOT/runtimes"
