@@ -215,35 +215,34 @@ it is the best possible outcome.
 
 ## The vendor source repository
 
-`src/crossover/sources/wine` is its own git repository (required — see above). Its layout
-is deliberate:
+`src/crossover` is a git repository of its own (`winecx-sources`), laid out exactly like
+CodeWeavers' tarball:
 
-| ref | contents |
-| --- | --- |
-| `vendor` | one commit per CrossOver release, **byte-identical** to `sources/wine` from that release's tarball |
-| `winecx-<cxver>` tags | the release points on `vendor` |
-| `main` | an orphan branch holding `README.md` + `add-release.sh` — kept off `vendor` so the source stays pristine |
-| others | work branches, based on a tag |
-
-Keeping `vendor` pristine is what makes a diff against it mean anything, and what stops
-our changes from silently becoming "the base". Upgrading is scripted — `add-release.sh` on
-the `main` branch downloads a release, records its sha256, replaces the tree wholesale,
-commits and tags, then reports how many files changed since the previous tag:
-
-```sh
-git -C src/crossover/sources/wine show main:add-release.sh > /tmp/add-release.sh
-chmod +x /tmp/add-release.sh && /tmp/add-release.sh 26.4.0 src/crossover/sources/wine
+```
+src/crossover/
+├── README.md  NOTICE  RELEASES.md  winecx.sh   ← ours
+└── sources/wine/                               ← byte-identical to the tarball
 ```
 
-Then rebase work branches onto the new tag. Releases share almost every file, so each one
-costs very little history.
+**The invariant: nothing of ours ever goes inside `sources/`.** That is what keeps
+"byte-identical" checkable rather than merely claimed — `./winecx.sh verify 26.3.0`
+downloads the tarball and diffs it. Our patches live in this workbench's `patches/`, not
+there.
 
-That repository is **local-only and not published**. It is a convenience: the tarball is a
-public download and every runtime's `PROVENANCE` records its sha256, so reproducibility
-never depends on it. Its `README.md` is already written on the `main` branch should it
-ever be pushed (as `winecx-sources`) — it is explicit that the repository is a companion
-rather than a mirror, makes no promise to track releases, and points at CodeWeavers'
-original as the thing to prefer.
+Releases are commits on `main`, tagged `winecx-<cxver>`. Adding one is
+`./winecx.sh add 26.4.0`, which branches, replaces `sources/wine` wholesale (so files
+dropped upstream really disappear), records the sha256 in the commit and `RELEASES.md`,
+and leaves a PR to open. After merging, tag it. Then:
+
+```sh
+git -C src/crossover diff --stat winecx-26.3.0 winecx-26.4.0 -- sources/
+```
+
+is the question this repository exists to answer quickly.
+
+That repository is **local-only and not published**; publishing is a decision for when
+there is something of ours worth pairing with it. Reproducibility never depends on it —
+the tarball is a public download and every runtime's `PROVENANCE` records its sha256.
 
 ## A built tree is not relocatable
 

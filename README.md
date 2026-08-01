@@ -123,7 +123,8 @@ bin/provision-host                     # --check verifies without installing
 mkdir -p src/crossover && cd src/crossover
 curl -O https://media.codeweavers.com/pub/crossover/source/crossover-sources-26.3.0.tar.gz
 tar xzf crossover-sources-26.3.0.tar.gz        # -> sources/wine
-cd sources/wine && git init -b vendor . && git add -A && git commit -m 'pristine'
+git init -b main . && git add -A && git commit -m 'WineCX 26.3.0' && git tag winecx-26.3.0
+cd ../..
 
 # 3. build (~25 min)
 bin/build-runtime --winecx 26.3.0 --pe-gcc
@@ -135,8 +136,10 @@ bin/get-addons winecx-26.3.0-sse-x86_64
 bin/mkprefix mygames
 ```
 
-The `git init` in step 2 is not optional — `build-runtime` refuses to build without it,
-for reasons `AGENT_START_HERE.md` explains.
+The `git init` in step 2 is not optional. Patching needs git — to apply the series, to
+prove the tree is otherwise unmodified, and to name the base it was applied to — so
+`build-runtime` refuses to build without it. The source may sit in a subdirectory of that
+repository (it does here, at `sources/wine/`); `build-runtime` handles that.
 
 ```sh
 bin/gamerun <profile>                  # launch a game or the Steam client

@@ -147,29 +147,33 @@ fi
 # install` fills in the rest and leaves lib/bundled alone.
 mkdir -p "$PREFIX" || die "cannot create $PREFIX"
 
-# --- source tree must be a git repo AT ITS ROOT ---------------------------
-# Not cosmetic. The patch loop below uses `git -C "$SRC" apply`. When $SRC is a
-# plain directory inside another repo -- which is exactly what an extracted
-# CrossOver tarball is, sitting in the gitignored src/ of this repo -- git
-# resolves upwards to the OUTER repo, prepends the path prefix, finds that the
-# patch's `dlls/...` paths do not start with it, and prints
+# --- source tree: find its git repo, and where it sits inside it -----------
+# The patch loop needs git, and one detail decides whether it works at all.
+#
+# These patches are `git diff` output, so they carry `diff --git a/... b/...`
+# headers -- and those paths are relative to the REPOSITORY ROOT. Applied from a
+# subdirectory, git therefore looks for <root>/dlls/..., does not find it, prints
 #
 #   Skipped patch 'dlls/wow64cpu/cpu.c'.
 #
-# while exiting 0. Every patch then reports as applied and NOTHING is patched.
-# So require the tree to be its own repo, which also gives `git status` to prove
-# the tree is clean and `git checkout .` to reset it.
+# and EXITS 0. Every patch reports as applied and nothing is patched. Measured
+# 2026-08-01: it is the `diff --git` header that causes this, not whether the tree
+# is its own repo and not whether the files are tracked -- a hand-written patch
+# without that header applies fine from a subdirectory, which is why an earlier
+# version of this comment blamed the wrong thing.
+#
+# The fix is to apply from the repository root with --directory=<prefix>, which
+# also supports a vendored layout (winecx-sources keeps the tree at sources/wine/).
 git -C "$SRC" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
-    || die "$SRC is not a git repository
-  Patch application would silently do nothing (see the comment above this check).
-  Fix with:
+    || die "$SRC is not inside a git repository
+  Patching needs git: to apply the series, to prove the tree is otherwise clean,
+  and to name the base it was applied to. Either clone winecx-sources, or:
     cd $SRC && git init -b vendor . && git add -A && git commit -m 'pristine'"
-src_prefix=$(git -C "$SRC" rev-parse --show-prefix 2>/dev/null)
-[ -z "$src_prefix" ] \
-    || die "$SRC is not the ROOT of its git repository (prefix: $src_prefix)
-  git apply would skip every hunk and still exit 0, producing an unpatched
-  runtime that looks patched. Give the source tree its own repository:
-    cd $SRC && git init -b vendor . && git add -A && git commit -m 'pristine'"
+SRC_ROOT=$(git -C "$SRC" rev-parse --show-toplevel)
+SRC_PREFIX=$(git -C "$SRC" rev-parse --show-prefix)      # "" or e.g. "sources/wine/"
+GIT_APPLY=(git -C "$SRC_ROOT" apply)
+[ -n "$SRC_PREFIX" ] && GIT_APPLY+=(--directory="$SRC_PREFIX")
+[ -n "$SRC_PREFIX" ] && info "source tree is $SRC_PREFIX inside $SRC_ROOT"
 
 # --- host sanity ----------------------------------------------------------
 # A missing dependency here shows up as a *silently degraded* runtime, not as a
@@ -221,11 +225,11 @@ while read -r class patch; do
     fi
     p="$GAMES_ROOT/patches/$patch"
     [ -f "$p" ] || die "missing patch: $p"
-    if git -C "$SRC" apply --check "$p" 2>/dev/null; then
-        git -C "$SRC" apply "$p" || die "failed to apply $patch"
+    if "${GIT_APPLY[@]}" --check "$p" 2>/dev/null; then
+        "${GIT_APPLY[@]}" "$p" || die "failed to apply $patch"
         info "  apply $patch ($class)"
         applied=$((applied+1))
-    elif git -C "$SRC" apply --reverse --check "$p" 2>/dev/null; then
+    elif "${GIT_APPLY[@]}" --reverse --check "$p" 2>/dev/null; then
         info "  ok    $patch (already applied)"
         applied=$((applied+1))
     else
@@ -236,7 +240,9 @@ while read -r class patch; do
     APPLIED_LIST="$APPLIED_LIST $patch"
     # --numstat only parses the patch, so it works whether or not it applied
     # here; the third field is the path.
-    PATCHED_FILES="$PATCHED_FILES $(git -C "$SRC" apply --numstat "$p" 2>/dev/null | awk '{print $3}')"
+    for f in $(git -C "$SRC_ROOT" apply --numstat "$p" 2>/dev/null | awk '{print $3}'); do
+        PATCHED_FILES="$PATCHED_FILES ${SRC_PREFIX}$f"
+    done
 done < "$SERIES"
 info "patches: $applied applied, $skipped skipped"
 
@@ -250,13 +256,23 @@ while read -r st f; do
     [ -n "$f" ] || continue
     case " $PATCHED_FILES " in *" $f "*) continue ;; esac
     stray="$stray $f"
-done < <(git -C "$SRC" status --porcelain)
+done < <(git -C "$SRC_ROOT" status --porcelain -- "${SRC_PREFIX:-.}")
+# The converse check, and the important one: every file a patch claimed to touch
+# must ACTUALLY be modified. This catches a silent no-op whatever its cause --
+# it does not depend on the mechanism described above being correctly understood.
+for f in $PATCHED_FILES; do
+    [ -n "$(git -C "$SRC_ROOT" status --porcelain -- "$f")" ] || \
+        die "a patch reported success but $f is unchanged -- patching silently did nothing.
+  This is the failure that produces a runtime which looks patched and is not.
+  Check how the series is being applied (see the comment above the git checks)."
+done
+
 [ -z "$stray" ] || die "source tree has modifications that no patch in the series accounts for:$stray
   Those changes would be built in but would NOT survive a clean rebuild, so the
   runtime would not be reproducible. Either write them up as a patch and add
   them to $SERIES, or discard them:
     git -C $SRC checkout --$stray"
-info "  tree differs from $(git -C "$SRC" describe --tags --always 2>/dev/null) only by the series"
+info "  tree differs from $(git -C "$SRC" describe --tags --always 2>/dev/null) only by the series, and every patch really applied"
 
 # --- build ----------------------------------------------------------------
 # Everything below must run in an x86_64 shell AND with CC forced, including
