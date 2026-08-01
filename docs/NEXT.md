@@ -13,7 +13,17 @@
   tarball on branch `vendor` at tag `winecx-26.3.0`, our work on `games`.
 - **Prefix:** `prefixes/steam-winecx`, an APFS clone of `steam-base` with `wineboot -u`
   run on it — which preserved the Steam login and the `S:` library registration, the two
-  steps only a human can redo.
+  steps only a human can redo. **Wine Mono was swapped 11.2.0 → 10.4.1 on 2026-08-01**:
+  it had been inherited from the 11.14-era lineage, so the prefix was running a Mono its
+  Wine never asked for (`addons.c` requests 10.4.1 on this 11.0 base). Verified
+  functionally, not just in the registry — the game's .NET `Launcher.exe` came up and the
+  game played. A broken .NET exits 255 silently with no window, so the launcher appearing
+  *is* the test.
+- **Also here:** `prefixes/control`, made by `bin/mkprefix` after its fix, as proof the
+  fix reproduces in this tree (31 fonts, Mono 10.4.1, `S:` resolving by exit code). It has
+  no Steam in it and is a clean starting point for a per-game prefix.
+  `prefixes/steam-winecx.pre-mono` is the rollback clone from the Mono swap — deletable
+  now that the swap is proven.
 - **Patches:** `wine-0004` (`workaround`; this base needs it) and `wine-0005` (`debug`).
   The four ports of CodeWeavers' hacks are in `patches/superseded/`.
 - **One runtime, one prefix.** The upstream `wine-11.14-x86_64` fallback, the
