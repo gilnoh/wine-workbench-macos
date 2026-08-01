@@ -2,6 +2,11 @@
 
 Paste this file (or just point at it) at the start of a new Claude session.
 
+**This is the handover brief, not the setup guide.** It assumes the environment already
+exists and covers what is settled, what will bite you, how to work here, and how to
+*run* things. For the goal, the directory layout, and how to **provision a host and
+build the runtime from scratch**, read `README.md` first.
+
 ---
 
 ## What this repo is
@@ -40,7 +45,8 @@ Open, in rough order:
 
 Read, in this order, and do not re-derive what they already record:
 
-1. `docs/NEXT.md` — start with **⚠️ THE PIVOT** and follow **THE REBUILD** (Steps 0–7)
+1. `docs/NEXT.md` — the rebase it describes is **done**; read "THE REBUILD" for what
+   each step actually produced, then Step 7 for what is still open
 2. `docs/RUNTIME.md` — what this environment changes from stock Wine and *why*
 3. `docs/BRIEF-wow64-mode-switch.md` — a solved case study; read only if you need the
    worked example of how findings get evidenced here
@@ -155,7 +161,7 @@ bin/compare-bottle Steam <prefix>    # diff the CrossOver bottle against one of 
   `-o` flags in the background and kill it after ~45 s. The attach message alone
   carries the fault address and faulting instruction. `timeout` is not installed.
 
-## Current state (end of 2026-07-31)
+## Current state (2026-08-01)
 
 - **Base:** `runtimes/winecx-26.3.0-sse-x86_64` (the SSE fix; now `DEFAULT_RUNTIME`
   and named in every profile), built from `src/crossover/sources/wine`
@@ -178,10 +184,17 @@ bin/compare-bottle Steam <prefix>    # diff the CrossOver bottle against one of 
   `winecx-26.3.0-clang-x86_64` is deliberately kept: its Steam-login regression is
   unresolved and debugging it should not require a 25-minute rebuild.
 
-## What "done" looks like
+## What "done" looked like — and where it landed
 
-Steam renders and logs in, Strategic Command reaches its menu with responsive menus
-and plays a turn — all on a `winecx-26.3.0` runtime with a `PROVENANCE` file, and with
-`patches/series` containing only deltas that are *ours* rather than ports of
-CodeWeavers' fixes. Bonus, and the test that validates the whole pivot: Steam renders
-with `WINE_APPEND_ARGS` unset, letting `wine-0004` be deleted.
+The goal set before the rebase was: *Steam renders and logs in, Strategic Command
+reaches its menu with responsive menus and plays a turn, on a WineCX 26.3.0 runtime with
+a `PROVENANCE` file, with `patches/series` holding only deltas that are ours rather than
+ports of CodeWeavers' fixes.*
+
+**All of that is met** (2026-08-01), plus clean audio after the x87 fix.
+
+The one stated bonus was **not** met, and is worth remembering as a lesson rather than
+deleting: *"Steam renders with `WINE_APPEND_ARGS` unset, letting `wine-0004` be
+deleted."* It was tested and is false — `CX HACK 23950` does not cover Steam's case, so
+`wine-0004` stays. The prediction had been written down as though it were nearly
+settled, on the strength of a grep. See `RUNTIME.md` §2.
