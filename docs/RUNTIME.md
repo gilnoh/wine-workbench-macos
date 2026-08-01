@@ -319,10 +319,74 @@ with arm64 objects.
 ## 5. Prefixes
 
 `bin/mkprefix <name>` creates one, mounts `S:`, and provisions corefonts +
-`d3dcompiler_47` via a pinned winetricks (plus Wine Mono when the runtime has it).
-`--no-provision` skips the winetricks step. **It has never been run end to end** —
-`steam-base` predates it and was provisioned by hand — so expect to debug it the
-first time. Note it does **not** install Steam; that is still manual.
+`d3dcompiler_47` via a pinned winetricks, then Wine Mono from the runtime's
+`share/wine/mono/`. `--no-provision` skips the whole provisioning step. It does
+**not** install Steam; that is still manual, and mounting `S:` is not the same as
+registering it as a Steam library folder — see `bin/mkprefix`'s own header.
+
+**Run `bin/get-addons <runtime>` before `mkprefix`**, or there is no Mono MSI to
+install. A source build ships none.
+
+Measured end to end for the first time on 2026-08-01 (WineCX 26.3.0, wb-test):
+31 fonts, Wine Mono 10.4.1, `S:` resolving. Note what an unprovisioned prefix
+looks like, because it is not what the name suggests: `C:\windows\Fonts` is
+**empty** — zero files, confirmed through Wine, not just on disk. Wine's own 56
+stock fonts (`tahoma.ttf`, `symbol.ttf`, `marlett.ttf`, the `.fon` bitmaps …)
+live in the *runtime's* `share/wine/fonts/` and are never copied into a prefix.
+So a font count taken inside a prefix measures provisioning only, which is what
+makes it a usable check.
+
+### Verifying a prefix
+
+Two checks that can actually fail, and the traps around them.
+
+**Pairing — is this prefix the one that runtime booted?** `wineboot` copies the
+runtime's PE builtins into the prefix, so their hashes match:
+
+```sh
+shasum -a 256 runtimes/<rt>/lib/wine/x86_64-windows/ntdll.dll \
+              prefixes/<pfx>/drive_c/windows/system32/ntdll.dll   # must be equal
+shasum -a 256 runtimes/<rt>/lib/wine/i386-windows/ntdll.dll \
+              prefixes/<pfx>/drive_c/windows/syswow64/ntdll.dll   # and this pair
+```
+
+⚠️ **`wine --version` does not test this.** It reports what that binary is and
+short-circuits before opening a prefix, so it passes identically against a prefix
+built by a completely different Wine. Keep `PROVENANCE` alongside the hashes and
+the chain is source → runtime → prefix, each link checkable.
+
+**`S:` — is the mount real?** A dangling `dosdevices/s:` is the failure this
+project keeps meeting: `ln -sfn` to a missing target succeeds, `ls -l` on the
+result exits 0 and prints a normal-looking line, and only dereferencing fails.
+
+⚠️ **Correcting an earlier claim of ours** (commit `de7ed14`) that
+`wine cmd /c dir S:\` is "the meaningful check". It discriminates, but it does
+**not** fail loudly, and the difference matters. Measured on WineCX 26.3.0:
+
+| | good `s:` | dangling `s:` |
+| - | --------- | ------------- |
+| `dir S:\` output | volume header **+ file entries** | volume header, **no entries** |
+| wine process exit status | 0 | **1** |
+| `ls -l dosdevices/s:` | 0 | **0** — cannot fail |
+
+So `dir S:\` on a broken mount still prints `Volume in drive S has no label` and
+`Directory of S:` with no error text at all. Glance at the header and it looks
+mounted. Use the process exit status, or better:
+
+```sh
+wine cmd /c 'if exist S:\<known-file> (echo FOUND) else (echo MISSING)'
+```
+
+⚠️ And do **not** reach for `%errorlevel%` to check it. Measured: `dir S:\ >nul
+2>&1 & echo %errorlevel%` prints `0` for both the good and the dangling case,
+because `cmd` expands `%errorlevel%` when it *parses* the compound statement,
+before `dir` has run. That is another control that cannot fail — the same family
+as the pipeline exit-code trap in `AGENT_START_HERE.md`.
+
+Finally, if you break `s:` deliberately to run this control, restore it from a
+shell `trap` on `EXIT INT TERM` and re-assert the positive case afterwards. An
+interrupted negative control leaves a working prefix broken, and the damage
+outlives the test — that has already happened here once, under build load.
 
 The manual equivalent, for reference (fetch winetricks with `bin/get-winetricks`):
 
@@ -416,7 +480,27 @@ which looks exactly like the game being incompatible rather than an addon being
 absent. Steam's `console_log.txt` showed the tell: `Game process added` followed
 by `Game process removed` two seconds later.
 
-`bin/mkprefix` installs Mono into new prefixes when the runtime has it.
+`bin/mkprefix` installs Mono into new prefixes when the runtime has it. **This
+sentence was false from the day it was written until 2026-08-01**, and it is worth
+knowing why, because the shape recurs.
+
+The lookup built its path as `"$(dirname "$BIN")/../share/wine/mono/"`. `$BIN` is
+already `runtimes/<rt>/bin`, so that resolved one level too high —
+`runtimes/share/wine/mono/` — and never matched an MSI that was sitting exactly
+where `get-addons` had put it. The miss was then *fatal and silent*: `common.sh`
+sets `set -eo pipefail`, so the empty `ls` at the head of
+`mono_msi=$(ls <glob> 2>/dev/null | head -1)` exited 1, pipefail carried that past
+the successful `head`, and `set -e` killed the script on the assignment. With
+`2>/dev/null` swallowing the message, `mkprefix` simply stopped after "fonts
+installed", printing no error and never reaching `prefix ready`.
+
+The `else` branch immediately below the lookup exists to warn *"no wine-mono in
+the runtime — run bin/get-addons"*. It was unreachable in precisely the case it
+was written for: **a guard that can only fire when it is not needed.**
+
+Fixed by naming the runtime root once (`RT_ROOT`) and replacing the pipeline with
+a glob loop, which cannot fail under `set -e` and so keeps the branch reachable.
+See the pipeline-exit-code rule in `AGENT_START_HERE.md`.
 
 ## 9. Launching Steam games
 

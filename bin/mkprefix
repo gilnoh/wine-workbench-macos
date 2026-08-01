@@ -33,6 +33,11 @@ PREFIX_PATH="$PREFIXES_DIR/$NAME"
 [ -e "$PREFIX_PATH" ] && die "prefix '$NAME' already exists at $PREFIX_PATH"
 
 BIN="$(runtime_bin "$RUNTIME")"
+# The runtime's own root, i.e. the parent of bin/. Named because the mono lookup
+# below got this wrong: it built its glob from "$(dirname "$BIN")/../share/...",
+# which is one level too high -- runtimes/share/wine/mono rather than
+# runtimes/<runtime>/share/wine/mono -- so it never found an MSI that was there.
+RT_ROOT="$(dirname "$BIN")"
 DYLD="$(runtime_dyld_path "$RUNTIME"):/usr/lib"
 
 info "creating prefix '$NAME' with runtime '$RUNTIME'"
@@ -97,12 +102,28 @@ if [ "$PROVISION" = 1 ]; then
         WINEDEBUG=-all \
         "$WINETRICKS" -q corefonts d3dcompiler_47 >/dev/null 2>&1 \
         || die "winetricks provisioning failed (is cabextract installed? see bin/provision-host)"
-    n=$(ls "$PREFIX_PATH/drive_c/windows/Fonts" 2>/dev/null | wc -l | tr -d ' ')
+    # Count with find, not `ls | wc -l`: see the note on the mono glob below --
+    # under `set -eo pipefail` an `ls` of a missing directory kills the script.
+    n=$(find "$PREFIX_PATH/drive_c/windows/Fonts" -type f 2>/dev/null | wc -l | tr -d ' ')
     info "  fonts installed: $n"
 
     # Wine Mono, if the runtime carries it. A source build does not download the
     # mono/gecko MSIs, so bin/get-addons fetches them into share/wine/.
-    mono_msi=$(ls "$(dirname "$BIN")/../share/wine/mono/"wine-mono-*.msi 2>/dev/null | head -1)
+    #
+    # Do NOT write this as `mono_msi=$(ls <glob> 2>/dev/null | head -1)`. That is
+    # what it used to be, and it made mkprefix die silently right here:
+    # common.sh sets `set -eo pipefail`, so when the glob matches nothing `ls`
+    # exits 1, pipefail propagates that past the successful `head`, and `set -e`
+    # kills the script on the assignment. The 2>/dev/null hides the message, so
+    # the run just stops after "fonts installed" with no error and no "prefix
+    # ready" -- and the else branch below, whose entire job is to warn that mono
+    # is missing, is unreachable in exactly the case it exists for.
+    #
+    # A glob loop cannot fail, so the branch is reachable either way.
+    mono_msi=""
+    for m in "$RT_ROOT"/share/wine/mono/wine-mono-*.msi; do
+        [ -f "$m" ] && { mono_msi="$m"; break; }
+    done
     if [ -n "$mono_msi" ]; then
         info "provisioning: wine-mono ($(basename "$mono_msi"))"
         env WINEPREFIX="$PREFIX_PATH" PATH="$BIN:$PATH" \

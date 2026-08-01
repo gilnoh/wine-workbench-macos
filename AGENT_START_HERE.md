@@ -168,6 +168,34 @@ The method that has produced every real finding here:
   result produced by a build too broken to reach the code path, and from a command-line
   flag that silently did nothing. Before believing a negative, prove the test could have
   detected a positive.
+- **`$?` after a pipeline is the *last* command's status.** `cmd | tail` reports whether
+  `tail` succeeded, which it essentially always does — so `some-script | tail -30; echo $?`
+  prints 0 for a script that died. This produced a false pass here three times in one day:
+  a `mkprefix` run that aborted midway and was read as clean, `ps -M` parsing, and a wine
+  exit code. Decide which command's status you mean, then get it:
+
+  ```sh
+  some-script | tail -30; echo "${PIPESTATUS[0]}"   # the script's status, not tail's
+  some-script > out.log 2>&1; echo $?               # or do not pipe at all
+  tail -30 out.log
+  ```
+
+  The same mechanism bites in the other direction *inside* a script: with `set -o pipefail`
+  a failing `ls` at the head of a pipeline propagates past a successful `head`, and under
+  `set -e` that kills the script on what looks like a harmless assignment
+  (`x=$(ls glob 2>/dev/null | head -1)`). Remedies, in order of preference:
+
+  1. **Restructure so the thing you care about is not mid-pipeline.** A glob loop cannot
+     fail, so the branch after it stays reachable — this is what `bin/mkprefix` now does.
+  2. `${PIPESTATUS[@]}` when you genuinely need a pipeline's component statuses.
+  3. `set +e` scoped to the one line, and back on immediately.
+
+  Prefer (1). It is the only one that also makes the code say what it means.
+
+  That bug is worth stating precisely, because the precise version is worse: `bin/mkprefix`
+  never worked at all. The Mono step arrived with the script in `c8efc2e` (2026-07-30), the
+  repo's first commit is 2026-07-29, and the fault was found on 2026-08-01 — so it was
+  broken from the day it was written and nobody had run it end to end in between.
 - **Isolate one variable.** When a build behaves differently, change one thing and
   rebuild under a new name. Swapping a single file between two runtimes is often the
   fastest way to localise a fault to code versus environment.

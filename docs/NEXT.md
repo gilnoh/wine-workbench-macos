@@ -43,8 +43,13 @@ real-time menu response, clean audio and smooth loading, and plays a turn.
    the x87 problem and by all the 32-bit work. Never tried; they may just work.
 4. **The SDL2/`winebus` crash** (`RUNTIME.md` §1) — gamepads do not work, and every
    prefix bring-up logs an alarming, unrelated-looking exception.
-5. **`bin/mkprefix` has still never run end to end**; installing Steam into a prefix is
-   manual.
+5. ~~**`bin/mkprefix` has still never run end to end**~~ — **CLOSED 2026-08-01.** It
+   now does, verified in the `wb-test` checkout on WineCX 26.3.0: 31 fonts, Wine Mono
+   10.4.1, `S:` resolving, `prefix ready` reached, real exit status 0. It took two
+   bug fixes to get there — the Mono lookup had never worked since it was written
+   (`RUNTIME.md` §8) — so "never run end to end" turned out to mean "was broken and
+   nobody had found out". Installing Steam into a prefix is still manual, and so is
+   registering `S:` as a Steam library folder.
 6. **Why CEF runs its GPU in-process under CrossOver and not for us** — reopened, see
    `RUNTIME.md` §2.
 
@@ -270,7 +275,8 @@ retired on the strength of 23950 existing, and that substitution is still untest
 APFS `cp -Rc` and `wineboot -u` it on the WineCX runtime, because that keeps the two
 things only a human can redo — the Steam login and the S: library-folder
 registration. `steam-base` stays as the untouched 11.14 fallback. A fresh
-`bin/mkprefix` is plan B (and it still has never run end to end). Note there are
+`bin/mkprefix` is plan B (it runs end to end as of 2026-08-01, but it cannot do the
+login or the `S:` registration, which is the whole reason cloning wins here). Note there are
 also two forgotten prefixes from the Jul 29 CX experiments, `steam-cxbuild` and
 `steam-cxtest`: Steam installed, never logged in.
 
@@ -941,10 +947,11 @@ open. The next thing to try is **`WINEMSYNC=1`**.
    not go through the WoW64 thunk at all and are very likely unaffected by the
    bug above. Worth trying early: they may just work.
 
-3. **Fold prefix provisioning into a fresh prefix.** `bin/mkprefix` now installs
-   corefonts, `d3dcompiler_47` and Wine Mono, but it has never been run
-   end to end — `steam-base` predates it and was provisioned by hand. Making a
-   per-game prefix is the natural time to exercise it.
+3. **Fold prefix provisioning into a fresh prefix.** `bin/mkprefix` installs
+   corefonts, `d3dcompiler_47` and Wine Mono, and as of 2026-08-01 it is measured
+   end to end (`wb-test`, WineCX 26.3.0) rather than assumed. `steam-base` predates
+   it and was provisioned by hand. Run `bin/get-addons` first or there is no Mono
+   MSI to install.
 
 ## Known-good launch recipes
 
