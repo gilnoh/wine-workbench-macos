@@ -54,6 +54,12 @@ env WINEPREFIX="$PREFIX_PATH" PATH="$BIN:$PATH" "$BIN/wineserver" -w
 # Mount the shared Steam library as drive S:. Steam itself creates a
 # SteamLibrary/steamapps/ tree underneath once the drive is registered in the
 # client, so do not pre-create steamapps/ here -- it only ends up unused.
+#
+# library/ is gitignored, so a fresh clone does not have it, and `ln -sfn` to a
+# missing target succeeds -- leaving a dangling s:. That fails in this project's
+# worst shape: the link exists, so `ls -l dosdevices/s:` looks right, while Wine
+# resolves it to nothing and S: is simply empty. Create the target instead.
+mkdir -p "$LIBRARY_DIR" || die "cannot create $LIBRARY_DIR"
 ln -sfn "$LIBRARY_DIR" "$PREFIX_PATH/dosdevices/s:"
 
 # --- provisioning ---------------------------------------------------------
