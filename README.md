@@ -126,6 +126,11 @@ tar xzf crossover-sources-26.3.0.tar.gz        # -> sources/wine
 git init -b main . && git add -A && git commit -m 'WineCX 26.3.0' && git tag winecx-26.3.0
 cd ../..
 
+#    (or, if you have access to the winecx-sources companion repository, which is
+#     the same tree already in git with releases tagged:
+#        git clone <winecx-sources> src/crossover
+#     CodeWeavers' tarball above remains the authoritative source either way.)
+
 # 3. build (~25 min)
 bin/build-runtime --winecx 26.3.0 --pe-gcc
 
