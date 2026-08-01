@@ -213,6 +213,31 @@ it is the best possible outcome.
 
 ---
 
+## The vendor source repository
+
+`src/crossover/sources/wine` is its own git repository (required — see above). Its layout
+is deliberate:
+
+| ref | contents |
+| --- | --- |
+| `vendor` | one commit per CrossOver release, **byte-identical** to `sources/wine` from that release's tarball |
+| `winecx-<cxver>` tags | the release points on `vendor` |
+| `main` | an orphan branch holding only a `README.md` — kept off `vendor` so the source stays pristine |
+| others | work branches, based on a tag |
+
+Keeping `vendor` pristine is what makes a diff against it mean anything, and what stops
+our changes from silently becoming "the base". Upgrading to a new CrossOver release is
+therefore: extract the new tarball over the tree while on `vendor`, `git add -A`, commit
+with the tarball name and sha256 in the message, tag it, then rebase work branches onto
+the new tag. Releases share almost every file, so each one costs very little history.
+
+That repository is **local-only and not published**. It is a convenience: the tarball is a
+public download and every runtime's `PROVENANCE` records its sha256, so reproducibility
+never depends on it. Its `README.md` is already written on the `main` branch should it
+ever be pushed (as `winecx-sources`) — it is explicit that the repository is a companion
+rather than a mirror, makes no promise to track releases, and points at CodeWeavers'
+original as the thing to prefer.
+
 ## A built tree is not relocatable
 
 Building bakes absolute paths in. `configure` is seeded with absolute soname paths so
