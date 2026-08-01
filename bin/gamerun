@@ -51,6 +51,20 @@ fi
 env_args=(
     WINEPREFIX="$PREFIX_PATH"
     PATH="$BIN:$PATH"
+    # msync: mach-port based synchronisation, opt-in per process AND per
+    # wineserver in CrossOver's tree (dlls/ntdll/unix/msync.c:422,
+    # server/msync.c:533). The working CrossOver bottle runs with it
+    # (cxbottle.conf [EnvironmentVariables] "WINEMSYNC" = "1"), so we match it --
+    # this is the configuration everything here was validated on.
+    #
+    # It was NOT the audio fix (that was x87 float math -- RUNTIME.md section 4);
+    # msync was enabled, *verified* active, and the jitter was unchanged. Kept
+    # because it matches the reference, not because it fixed anything.
+    #
+    # Set WINEMSYNC=0 to disable -- but the whole prefix must be down first, since
+    # the wineserver reads it too, and a mismatch logs
+    #   "Server is running with WINEMSYNC but this process is not"
+    WINEMSYNC="${WINEMSYNC:-1}"
 )
 # Deliberately NOT setting DYLD_FALLBACK_LIBRARY_PATH.
 #

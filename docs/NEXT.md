@@ -478,7 +478,49 @@ reaches its menu, menus respond in **real time**, and a turn plays.
    `$BREW/opt/llvm/bin`. (`lld-link` *is* linked into `$BREW/bin` by the separate `lld`
    formula, so linking is not the part that breaks.)
 
-   **So the recommended next step is `bin/build-runtime --winecx 26.3.0 --pe-gcc`**,
+   ### ✅ FIXED: `runtimes/winecx-26.3.0-sse-x86_64`
+
+   `bin/build-runtime --winecx 26.3.0 --pe-gcc` — mingw-gcc with
+   `i386_CFLAGS='-g -O2 -msse2 -mfpmath=sse'`, i.e. one variable changed from the build
+   that worked. Measured at the menu, same test as every other row:
+
+   | | total CPU | `wine_dsound_mixer` | i386 dsound float math |
+   | - | --------- | ------------------- | ---------------------- |
+   | before (x87) | 197.8% | **100%** at `63T` | 0 SSE / 1334 x87 |
+   | CrossOver's shipped build | ~101% | 1.5% at `63R` | 741 SSE / 52 x87 |
+   | their DLL on our runtime | 101.0% | 1.5% at `63R` | — |
+   | **ours, `--pe-gcc`** | **101.9%** | **1.4%** at **`63R`** | **138 SSE / 24 x87** |
+
+   The mixer is back in the realtime band rather than demoted for spinning, and the only
+   busy thread is the game's own loop at `31T` — the same signature as both builds that
+   always sounded fine.
+
+   Note the SSE/x87 counts do not have to match CrossOver's exactly (different compiler,
+   different inlining); what matters is that float math is SSE and x87 is residual.
+
+   **Confirmed by ear (Gil, 2026-08-01): "audio is clean now, no jitter" and "loading
+   up was also smooth"** — so the x87 penalty was hitting more than the mixer, exactly
+   as expected for something that slowed every float-heavy 32-bit path.
+
+   Done as part of this: `winecx-26.3.0-sse-x86_64` is now `DEFAULT_RUNTIME` and every
+   profile points at it plus `prefixes/steam-winecx`; the superseded runtimes
+   (`winecx-26.3.0-x86_64` (x87), `-mt1015-`, `-cxdsound-`, `wine-cx26.3-x86_64`) and
+   their build trees are deleted (~14 GB). `bin/gamerun` now sets `WINEMSYNC=1` by
+   default to match the reference bottle — **not** because it fixed anything.
+
+   Remaining for this thread:
+   - **the 2 s → 20 s menu fade** — re-measure on this build before theorising; the
+     loading-smoothness improvement suggests the fade may have been x87 as well.
+   - **clang** remains the better long-term PE toolchain (it is what CrossOver and
+     upstream prefer, and it brings `-fms-hotpatch`); its Steam-login regression is the
+     blocker. `runtimes/winecx-26.3.0-clang-x86_64` and its build tree are kept so this
+     can be debugged without a 25-minute rebuild.
+   - **the runtime name** still carries a `-sse` suffix, which is historical now that
+     `build-runtime` guarantees and asserts SSE for every build. A future rebuild can
+     drop it; renaming the directory in place is not safe.
+
+   For the record, the earlier recommendation, which is what produced the fix:
+   **`bin/build-runtime --winecx 26.3.0 --pe-gcc`**,
    which keeps the toolchain that demonstrably works and changes only the float math
    (`i386_CFLAGS=-g -O2 -msse2 -mfpmath=sse`). Verified in a smoke test: the same float
    loop compiles to 7 SSE / 1 x87 with those flags versus 0 SSE / 5 x87 without. That

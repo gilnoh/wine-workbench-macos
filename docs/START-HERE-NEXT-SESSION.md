@@ -13,19 +13,30 @@ to be a launcher — it is a development environment for macOS-specific Wine wor
 
 ## Your goal this session
 
-**The WineCX 26.3.0 rebase is DONE (2026-07-31).** Steam renders and logs in,
-Strategic Command plays, and `patches/series` is down to one functional delta of ours.
-The work now is the two things the rebase left behind:
+**The WineCX 26.3.0 rebase is DONE, and so is the audio regression it exposed
+(2026-07-31 → 08-01).** Steam renders and logs in, Strategic Command plays with clean
+audio and smooth loading, and `patches/series` is down to one functional delta of ours.
 
-1. **Try `WINEMSYNC=1`** — the working CrossOver bottle sets it, we do not, and msync
-   is opt-in per process *and per wineserver* in this base. Suspect for both open
-   symptoms. There is an `ERR` for a server/client mismatch, so the variable's arrival
-   is verifiable — verify it.
-2. **Audio jitters** noticeably worse than on the old upstream runtime. First genuine
-   regression from the base change.
+The finding worth carrying forward: **our 32-bit PE DLLs were compiling float math to
+x87, which Rosetta 2 emulates badly.** `wine_dsound_mixer` burned a whole core (100% vs
+1.5%) and the audio jittered. `bin/build-runtime` now guarantees SSE and **fails the
+build** if it is missing. See `RUNTIME.md` §4 and the root-cause section in `NEXT.md`;
+msync was excluded along the way (enabled and *verified* active, jitter unchanged).
 
-Then the older open items: the 2 s → 20 s menu fade, the other two games, and the
-SDL2/`winebus` crash.
+Open, in rough order:
+
+1. **The 2 s → 20 s menu fade** — the last known symptom. Re-measure on the current
+   build before theorising: loading got smoother with the x87 fix, so this may have
+   gone with it.
+2. **clang as the PE compiler** — the better long-term toolchain (CrossOver's and
+   upstream's choice; brings `-fms-hotpatch`), blocked on a Steam-login regression
+   (`EConnect` retried every 50 ms, zero TLS errors).
+   `runtimes/winecx-26.3.0-clang-x86_64` and its build tree are kept so this needs no
+   rebuild to debug.
+3. **The other two games** — Quasimorph, Battleship Command. Both 64-bit, so untouched
+   by the x87 problem and by all the 32-bit work. Never tried; they may just work.
+4. **The SDL2/`winebus` crash** (`RUNTIME.md` §1) — gamepads do not work, and every
+   prefix bring-up logs an alarming, unrelated-looking exception.
 
 Read, in this order, and do not re-derive what they already record:
 
@@ -62,7 +73,8 @@ Read, in this order, and do not re-derive what they already record:
 ## ⚠️ Three traps that will bite you
 
 **1. The bundled-libs work does NOT come free from CrossOver.**
-`runtimes/wine-cx26.3-x86_64` has **zero** bundled dylibs. Wine `dlopen`s libraries by
+A CX tree built with plain flags produces **zero** bundled dylibs — that is what the
+first CX-based runtime here did, and it was unusable for it. Wine `dlopen`s libraries by
 bare soname and macOS has no `/etc/ld.so.conf.d/`, so they silently go missing — and
 the failure modes all look like unrelated application bugs: no Vulkan (Steam decides
 there is no GPU), no freetype (no fonts, or no text at all in DirectWrite apps), no
@@ -89,6 +101,9 @@ near-instant), though a fresh prefix is cleaner across a Wine-version change. No
 
 ## How to work here (hard-won, please follow)
 
+- **When two builds of the same source differ, compare the binaries.** The audio bug
+  was found by disassembling both `dsound.dll`s (`0 SSE / 1334 x87` vs `741 / 52`) after
+  a one-file swap localised it. Source diffing had already exonerated the source.
 - **Measure the thing, not a proxy.** The menu-latency bug had *normal* CPU, page
   faults and mach-syscall numbers — identical to CrossOver's. The thread was not
   working, it was waiting. Reading `ps`/`top` counters instead of the actual symptom
@@ -99,9 +114,13 @@ near-instant), though a fresh prefix is cleaner across a Wine-version change. No
   gitignored, which makes it look like build output. It is not.
   `grep -rn 'CW HACK' src/crossover/sources/wine/` enumerates their intentional
   divergences.
-- **Verify a control before believing a negative result.** "It wasn't msync" is
-  recorded as *not demonstrated* rather than *excluded*, because nobody confirmed the
-  env var reached the process.
+- **Verify a control before believing a negative result.** msync is now properly
+  *excluded* (enabled, confirmed active via `msync: up and running` + shm traces, jitter
+  unchanged) rather than merely "not demonstrated". The same session produced two
+  near-misses from bad controls: a three-runtime comparison whose clean result came from
+  a runtime too degraded to reach the code path at all, and a `strings -el` check that
+  silently proved nothing because macOS `strings` has no such flag. **A control that
+  cannot fail is not a control.**
 - **Do not write conclusions into `NEXT.md` while still investigating.** Doing that
   turned a guess into a stated finding and pointed the next reader away from the
   answer for a whole session. Record observations freely; defer conclusions.
@@ -116,7 +135,7 @@ near-instant), though a fresh prefix is cleaner across a Wine-version change. No
 bin/killwine                 # kill everything, Steam included
 bin/killwine --game-only     # kill only the game, leave Steam up (60 s -> 3 s iteration)
 bin/killwine --deep          # exact lsof sweep, ~20 s, for orphans argv matching misses
-bin/gamerun steam            # Steam client
+bin/gamerun steam            # Steam client (winecx-26.3.0-sse + steam-winecx are now the defaults)
 bin/gamerun strategic-command        # via steam.exe -applaunch (real path, needs a PLAY click)
 bin/gamerun strategic-command-direct # runs the exe directly; needs Steam up + steam_appid.txt
 bin/compare-bottle Steam <prefix>    # diff the CrossOver bottle against one of ours
@@ -138,7 +157,8 @@ bin/compare-bottle Steam <prefix>    # diff the CrossOver bottle against one of 
 
 ## Current state (end of 2026-07-31)
 
-- **Base:** `runtimes/winecx-26.3.0-x86_64`, built from `src/crossover/sources/wine`
+- **Base:** `runtimes/winecx-26.3.0-sse-x86_64` (the SSE fix; now `DEFAULT_RUNTIME`
+  and named in every profile), built from `src/crossover/sources/wine`
   (now its own git repo: pristine tarball on branch `vendor`, tag `winecx-26.3.0`, our
   work on `games`). Every runtime carries a `PROVENANCE` file that `build-runtime`
   writes and asserts.
@@ -153,9 +173,10 @@ bin/compare-bottle Steam <prefix>    # diff the CrossOver bottle against one of 
   (would have handed this base an MSI Wine 11.0 rejects); `mkprefix`/`gamerun` called
   `$BIN/wineboot`/`$BIN/winecfg`, which **do not exist on a WineCX runtime** — their
   `TOP_INSTALL_LIB` installs no app loaders. Use `wine <tool>`.
-- `src/cx26/` deleted. `runtimes/wine-cx26.3-x86_64` was **not** misnamed (an earlier
-  note said so; `config.status` proves it came from 26.3.0 source) but has zero bundled
-  libs, so it is unusable and superseded.
+- `src/cx26/` deleted, along with the superseded runtimes (`wine-cx26.3-x86_64`, the
+  x87 `winecx-26.3.0-x86_64`, and the `-mt1015-`/`-cxdsound-` experiments) — ~14 GB.
+  `winecx-26.3.0-clang-x86_64` is deliberately kept: its Steam-login regression is
+  unresolved and debugging it should not require a 25-minute rebuild.
 
 ## What "done" looks like
 

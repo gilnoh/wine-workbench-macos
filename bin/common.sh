@@ -14,8 +14,12 @@ PREFIXES_DIR="$GAMES_ROOT/prefixes"
 PROFILES_DIR="$GAMES_ROOT/profiles"
 LIBRARY_DIR="$GAMES_ROOT/library"
 
-# Default runtime, overridable per profile.
-DEFAULT_RUNTIME="wine-11.14-x86_64"
+# Default runtime, overridable per profile (and by RUNTIME= in the environment).
+#
+# The "-sse" suffix is historical: it was the build that fixed the x87 float-math
+# bug (docs/RUNTIME.md section 4). bin/build-runtime now guarantees SSE for every
+# build and fails otherwise, so a future rebuild can drop the suffix.
+DEFAULT_RUNTIME="winecx-26.3.0-sse-x86_64"
 
 die()  { echo "error: $*" >&2; exit 1; }
 info() { echo "==> $*"; }
