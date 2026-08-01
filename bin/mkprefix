@@ -7,8 +7,14 @@
 #
 # The prefix itself stays small. Game data lives in library/steamapps, mounted
 # as drive S: so every prefix sees the same installed games without duplicating
-# them -- but note Steam only *uses* S: if it is registered as a library folder,
-# which register_steam_library() below does.
+# them.
+#
+# This script mounts S: and stops there. Steam only *uses* the drive once it is
+# registered as a library folder, and this script cannot do that for you: Steam
+# owns steamapps/libraryfolders.vdf and rewrites it, so it has to be added from
+# the client (Settings > Storage > '+' > S:\). That is one of the two steps only
+# a human can do -- the other being the login -- which is why cloning a working
+# prefix often beats making a new one. See AGENT_START_HERE.md.
 
 source "$(dirname "$0")/common.sh"
 
