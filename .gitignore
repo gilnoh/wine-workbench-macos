@@ -5,14 +5,25 @@
 /backends/*/
 /prefixes/
 /library/
+# Build logs live in build/ (bin/build-runtime writes <name>-build.log there).
+# There is deliberately no /logs/ rule: nothing in the tree writes a root logs/,
+# and the `logs/` paths in bin/compare-bottle and docs/ are Steam's own, inside a
+# prefix. A rule kept for a directory nobody creates is just a wrong map.
 
 # Keep the backend layout documented even though contents are ignored.
 !/backends/README.md
 
 *.log
 .DS_Store
+
+# An ignore rule protects content that EXISTS, which is not the same as content
+# some script names -- so grepping bin/ for a path does not tell you a rule is
+# dead. These two are referenced by nothing and are both live:
+#   toolchains/            the locally built LLVM used as the PE compiler
+#                          (llvm-project, llvm-build, llvm, venv-meson -- 2.3 GB).
+#                          See docs/NEXT.md on clang as the PE toolchain.
+#   patches/winemac-backup/  saved winemac.drv trees from the surface work.
 /toolchains/
-/logs/
 /patches/winemac-backup/
 
 # probe binaries (rebuild with tools/probes/build.sh)
