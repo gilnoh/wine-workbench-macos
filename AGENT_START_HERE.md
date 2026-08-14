@@ -297,6 +297,19 @@ way the bundling design exists to prevent: no error, just no Vulkan, no fonts, n
 Prefixes have the same issue: `dosdevices/s:` is an absolute symlink to `library/`, and
 `build/` trees hold absolute `srcdir`/`prefix`.
 
+**`toolchains/` is affected too, and it is the one nobody looks at.** A Python venv's
+scripts are shebanged with an absolute path to their own interpreter, so after a rename
+`toolchains/venv-meson/bin/meson` reports
+
+```
+bad interpreter: /old/path/toolchains/venv-meson/bin/python3.14: no such file
+```
+
+Found 2026-08-14, months after the rename, when the first backend rebuild needed it.
+`bin/build-backend` now recreates that venv itself rather than trusting it — the pin
+matters (Homebrew's meson 1.10.1 crashes on DXMT's cross build with an internal
+`KeyError`), so "meson is installed" is not the same as "meson works here".
+
 Cloning to a new machine or path is fine — you build there, so the paths are correct.
 It is *moving an existing built tree* that breaks. If you must:
 

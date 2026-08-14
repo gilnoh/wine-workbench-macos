@@ -1,0 +1,255 @@
+#!/bin/bash
+# Build a graphics-translation backend into backends/<name>-<version>/.
+#
+#   bin/build-backend dxmt                       # against DEFAULT_RUNTIME's build tree
+#   bin/build-backend dxmt --runtime <rt>        # against another runtime's build tree
+#   bin/build-backend dxmt --name dxmt-0.80-cx   # override the output directory name
+#   bin/build-backend dxmt --force               # reuse the existing meson build dir
+#
+# WHY THIS EXISTS
+#
+# Every runtime carries a PROVENANCE file; backends carried nothing. DXMT was
+# built once, by hand, in July 2026 -- and by the time anything depended on it
+# (2026-08-14, when it turned out to be the *only* way to run a D3D11 game here;
+# docs/RUNTIME.md section 10) the recipe survived only in a gitignored build log,
+# and the -Dwine_build_path it named pointed at a tree that had since been
+# deleted, under the checkout's pre-rename path. So the backend worked and could
+# not be rebuilt: a clean checkout could not produce one at all, and losing
+# backends/dxmt-0.80/ would have lost the capability with it.
+#
+# backends/*/ is gitignored (build output), which is correct -- but it means the
+# recipe is the only thing that can live in git. This script is that recipe.
+#
+# It also settles the "should DXMT be retargeted at Wine 11.0?" question by
+# construction: -Dwine_build_path defaults to the *current* runtime's build tree,
+# so a rebuild is targeted at whatever runtime you are actually running. The
+# retarget is not a separate task.
+
+set -uo pipefail
+
+source "$(dirname "$0")/common.sh"
+
+BACKEND=""
+RUNTIME="$DEFAULT_RUNTIME"
+NAME_OVERRIDE=""
+FORCE=0
+JOBS=8
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --runtime) RUNTIME="$2"; shift 2 ;;
+        --name)    NAME_OVERRIDE="$2"; shift 2 ;;
+        --jobs)    JOBS="$2"; shift 2 ;;
+        --force)   FORCE=1; shift ;;
+        -*)        die "unknown option: $1" ;;
+        *)         [ -z "$BACKEND" ] || die "only one backend at a time"; BACKEND="$1"; shift ;;
+    esac
+done
+[ -n "$BACKEND" ] || die "usage: build-backend <backend> [--runtime <rt>] [--name <dir>] [--force]"
+[ "$BACKEND" = dxmt ] || die "only 'dxmt' is supported so far (dxvk was vendored, not built here)"
+
+SRC="$GAMES_ROOT/src/dxmt"
+[ -d "$SRC" ] || die "no DXMT source at $SRC
+  git clone https://github.com/3Shain/dxmt $SRC && git -C $SRC checkout v0.80"
+
+# --- the Wine build tree we compile against -------------------------------
+#
+# DXMT's winemetal.so is a Wine unixlib: it includes Wine's headers and links
+# against the ntdll.so/winemac.so in a *build* tree, not an installed runtime.
+# So this needs build/<runtime>, not runtimes/<runtime>.
+WINE_BUILD="$GAMES_ROOT/build/$RUNTIME"
+[ -d "$WINE_BUILD/include" ] || die "no Wine build tree at $WINE_BUILD
+  build-backend compiles against a *build* tree (build/<rt>), not the installed
+  runtime, because winemetal.so is a Wine unixlib. Rebuild the runtime first:
+    bin/build-runtime --winecx <ver> --pe-gcc"
+[ -d "$RUNTIMES_DIR/$RUNTIME" ] || die "no runtime '$RUNTIME' -- the build tree exists but the install does not"
+
+# Native LLVM, for airconv (DXBC -> Metal AIR). Locally built; see toolchains/.
+LLVM="$GAMES_ROOT/toolchains/llvm"
+[ -d "$LLVM/lib" ] || die "no native LLVM at $LLVM -- airconv cannot build without it"
+
+for t in ninja x86_64-w64-mingw32-gcc xcrun xxd python3; do
+    command -v "$t" >/dev/null || die "missing build tool: $t (bin/provision-host)"
+done
+
+# --- meson must be PINNED, and the script owns that ------------------------
+#
+# Not a preference. Homebrew's meson 1.10.1 dies configuring this cross build
+# with an internal error:
+#
+#   KeyError: 'Tried to access nonexistant project parent option
+#             build.cpp_importstd.'
+#   ERROR: Unhandled python exception ... This is a Meson bug
+#
+# so "meson is installed" is not the same as "meson works here". DXMT was
+# originally built with 1.9.1 out of toolchains/venv-meson -- and that venv had
+# since been broken by the checkout rename, because a venv's shebang is an
+# absolute path to its own interpreter:
+#
+#   #!/Users/<user>/games/toolchains/venv-meson/bin/python3.14
+#
+# i.e. the same not-relocatable failure documented for runtimes and prefixes in
+# AGENT_START_HERE.md, in a place nobody thought to look. Recreating the venv is
+# seconds, so this script just repairs it rather than telling a human to.
+MESON_VERSION=1.9.1
+VENV="$GAMES_ROOT/toolchains/venv-meson"
+MESON="$VENV/bin/meson"
+if ! "$MESON" --version 2>/dev/null | grep -qx "$MESON_VERSION"; then
+    info "  (re)creating toolchains/venv-meson with meson $MESON_VERSION"
+    rm -rf "$VENV"
+    python3 -m venv "$VENV" || die "could not create the meson venv"
+    "$VENV/bin/pip" -q install "meson==$MESON_VERSION" || die "could not install meson $MESON_VERSION"
+fi
+"$MESON" --version 2>/dev/null | grep -qx "$MESON_VERSION" \
+    || die "meson $MESON_VERSION still not available at $MESON"
+
+# --- version and output name ----------------------------------------------
+#
+# Take the version from the source tag, not from a directory name -- naming a
+# build after something a human typed is how runtimes/wine-cx26.3-x86_64 came to
+# claim a provenance it did not have.
+SRC_TAG="$(git -C "$SRC" describe --tags --always 2>/dev/null)" || die "src/dxmt is not a git repo"
+SRC_COMMIT="$(git -C "$SRC" rev-parse HEAD)"
+WINE_REPORTED="$("$RUNTIMES_DIR/$RUNTIME/bin/wine" --version 2>/dev/null | head -1)"
+
+NAME="${NAME_OVERRIDE:-$BACKEND-${SRC_TAG#v}-${RUNTIME%-x86_64}}"
+OUT="$BACKENDS_DIR/$NAME"
+
+info "building $BACKEND $SRC_TAG"
+info "  against  build/$RUNTIME  ($WINE_REPORTED)"
+info "  output   backends/$NAME"
+
+# --- apply our deltas from patches/series ---------------------------------
+#
+# Same contract as bin/build-runtime: nothing goes into the vendor tree without
+# a patch file. Unlike build-runtime this tree is not asserted clean afterwards,
+# because DXMT's build writes version.h into the source dir -- but the patches
+# are re-applied idempotently and a failure to apply is fatal.
+SERIES="$GAMES_ROOT/patches/series"
+APPLIED=""
+while read -r class patch; do
+    case "$class" in ''|\#*) continue ;; esac
+    case "$patch" in dxmt-*) ;; *) continue ;; esac
+    [ "$class" = debug ] && continue
+    p="$GAMES_ROOT/patches/$patch"
+    [ -f "$p" ] || die "patches/series names $patch but it does not exist"
+    if git -C "$SRC" apply --check "$p" 2>/dev/null; then
+        git -C "$SRC" apply "$p" || die "failed to apply $patch"
+        echo "    applied $patch"
+    elif git -C "$SRC" apply --check --reverse "$p" 2>/dev/null; then
+        echo "    already applied $patch"
+    else
+        die "$patch neither applies nor is applied -- the source tree is not what the series expects"
+    fi
+    APPLIED="${APPLIED:+$APPLIED }$patch"
+done < "$SERIES"
+
+# --- configure and build --------------------------------------------------
+#
+# -Dwine_builtin_dll=false keeps the PE DLLs out of the runtime so that backend
+# choice stays per-prefix (backends/README.md). Note that this does NOT apply to
+# winemetal.dll: a unixlib's PE half must sit in the runtime regardless, or Wine
+# cannot pair it with the .so. bin/backend-install handles that.
+BUILD="$SRC/build"
+if [ "$FORCE" = 0 ] && [ -d "$BUILD" ]; then
+    info "  removing previous build dir (use --force to reuse it)"
+    rm -rf "$BUILD"
+fi
+
+MESON_ARGS=(
+    --cross-file "$SRC/build-win64.txt"
+    --buildtype release
+    -Dnative_llvm_path="$LLVM"
+    -Dwine_build_path="$WINE_BUILD"
+    -Dwine_builtin_dll=false
+)
+
+LOG="$GAMES_ROOT/build/$NAME-build.log"
+mkdir -p "$GAMES_ROOT/build"
+info "  configuring (log: build/$NAME-build.log)"
+if [ -d "$BUILD" ]; then
+    (cd "$SRC" && "$MESON" setup --reconfigure "${MESON_ARGS[@]}" build) >"$LOG" 2>&1 \
+        || { tail -30 "$LOG"; die "meson reconfigure failed -- see $LOG"; }
+else
+    (cd "$SRC" && "$MESON" setup "${MESON_ARGS[@]}" build) >"$LOG" 2>&1 \
+        || { tail -30 "$LOG"; die "meson setup failed -- see $LOG"; }
+fi
+
+info "  compiling"
+ninja -C "$BUILD" -j "$JOBS" >>"$LOG" 2>&1 \
+    || { tail -40 "$LOG"; die "ninja failed -- see $LOG"; }
+
+# --- lay out backends/<name>/ ---------------------------------------------
+#
+# Layout contract is in backends/README.md and mirrors CrossOver's
+# SharedSupport/CrossOver/lib/{dxvk,dxmt}/.
+rm -rf "$OUT"
+mkdir -p "$OUT/x86_64-windows" "$OUT/x86_64-unix"
+
+found_pe=0 found_unix=0
+while IFS= read -r f; do
+    cp -f "$f" "$OUT/x86_64-windows/" && echo "    x86_64-windows/$(basename "$f")"
+    found_pe=$((found_pe + 1))
+done < <(find "$BUILD/src" -name '*.dll' -type f)
+while IFS= read -r f; do
+    cp -f "$f" "$OUT/x86_64-unix/" && echo "    x86_64-unix/$(basename "$f")"
+    found_unix=$((found_unix + 1))
+done < <(find "$BUILD/src" -name '*.so' -type f)
+
+# A build that produces nothing must not look like a success. This is the
+# "a control that cannot fail is not a control" rule applied to packaging:
+# without it, an empty backends/<name>/ would install cleanly and the game
+# would fail later for reasons that point nowhere near here.
+[ "$found_pe" -ge 4 ]  || die "expected at least 4 PE DLLs, found $found_pe -- build produced nothing usable"
+[ "$found_unix" -ge 1 ] || die "expected winemetal.so, found $found_unix unixlibs"
+for want in d3d11.dll d3d10core.dll dxgi.dll winemetal.dll; do
+    [ -f "$OUT/x86_64-windows/$want" ] || die "build did not produce $want"
+done
+[ -f "$OUT/x86_64-unix/winemetal.so" ] || die "build did not produce winemetal.so"
+
+# --- backend.conf ---------------------------------------------------------
+cat > "$OUT/backend.conf" <<CONF
+# $NAME -- Direct3D 10/11 on Metal. Generated by bin/build-backend; see PROVENANCE.
+#
+# Built with -Dwine_builtin_dll=false, so the PE DLLs live in each prefix rather
+# than in the shared runtime -- that keeps backend choice per-game, which is the
+# point of the backends/ + profiles/ split. winemetal.so is the exception: it is
+# a Wine unixlib and must sit in the runtime tree, and so must winemetal.dll, or
+# Wine cannot pair the two. bin/backend-install places both.
+#
+# DXMT is REQUIRED for D3D10/11 titles on macOS, not an optimisation --
+# wined3d caps at feature level 9_3 on MoltenVK. See docs/RUNTIME.md section 10.
+
+BACKEND_OVERRIDES="dxgi,d3d11,d3d10core=n,b"
+
+BACKEND_ENV=(
+    DXMT_LOG_LEVEL=warn
+)
+CONF
+
+# --- PROVENANCE -----------------------------------------------------------
+{
+    echo "backend:           $NAME"
+    echo "upstream:          dxmt $SRC_TAG"
+    echo "source_tree:       src/dxmt"
+    echo "source_commit:     $SRC_COMMIT"
+    echo "patches:           ${APPLIED:-<none>}"
+    echo "built_against:     build/$RUNTIME"
+    echo "wine_reported:     $WINE_REPORTED"
+    echo "native_llvm:       toolchains/llvm"
+    echo "pe_compiler:       $(x86_64-w64-mingw32-gcc --version | head -1)"
+    echo "meson:              $MESON_VERSION (toolchains/venv-meson)"
+    echo "meson_options:     ${MESON_ARGS[*]}"
+    echo "built:             $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "built_by:          bin/build-backend"
+} > "$OUT/PROVENANCE"
+
+for field in backend upstream source_commit built_against wine_reported; do
+    grep -qE "^$field: +\S" "$OUT/PROVENANCE" \
+        || die "PROVENANCE is missing $field -- refusing to leave an unlabelled backend"
+done
+
+info "done: backends/$NAME"
+cat "$OUT/PROVENANCE"
+echo
+info "install it with:  bin/backend-install $NAME <prefix> $RUNTIME"
+info "then set BACKEND=\"$NAME\" in the profile."
