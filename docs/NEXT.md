@@ -54,24 +54,41 @@
     `AGENT_START_HERE.md`, "A built tree is not relocatable" — `toolchains/` is
     now named there alongside runtimes, prefixes and build trees.
 
-- **⚠️ OPEN: one unexplained D3D11 init failure.** A single launch of the rebuilt
-  DXMT came up with `d3d11: failed to create device and context (80004005)`; the
-  next launch of the same binaries was fine, and **6/6 subsequent cold launches
-  passed**. So it is not a frequent flake. It is *not* explained.
+- **✅ SOLVED (2026-08-15): the "intermittent" D3D11 failure was `BACKEND=` not
+  reaching Steam-launched games.** Not a flake, not DXMT, not the install. A
+  Steam game's parent is the Steam client, `WINEDLLOVERRIDES` does not cross that
+  hand-off, and `profiles/steam.env` sets `BACKEND="none"` — so the game came up
+  on wined3d, which caps at 9_3 and fails with `0x80004005`. Same error code as
+  the wined3d baseline measured hours earlier, which should have been the tell.
 
-  Do not record the working theory as a cause. It is: `bin/backend-install` used
-  `cp -f`, which truncates and rewrites in place rather than replacing the inode,
-  so any process holding `winemetal.so` mapped sees its pages change underneath
-  it — and the failing run was the first launch after exactly that. `cp -f` is
-  now `cp` to a temp name + `mv` (atomic, new inode), and the script refuses to
-  install while processes are live on the prefix or runtime.
+  **Fixed with Wine's per-application key**, keyed on the exe so it survives any
+  launch path: `bin/backend-install --app '<Game.exe>'` writes and asserts
+  `HKCU\Software\Wine\AppDefaults\<exe>\DllOverrides`. Verified with the
+  strongest control available — `BACKEND=none`, no environment overrides at all,
+  via `-applaunch` against a running client → `Direct3D 11.0 [level 11.1]`.
+  Full write-up in `RUNTIME.md` §9.
 
-  **The 6/6 result does not test that hypothesis.** All six launches ran against
-  an already-installed backend, so none of them reproduced the suspected trigger
-  (first launch after an install). A control that cannot reproduce the condition
-  cannot exonerate it. If it recurs, the thing to capture is `WINEDEBUG=+loaddll`
-  plus `DXMT_LOG_LEVEL=trace` *on the failing run* — the failure that started
-  this had neither.
+  **How it was actually found, because the method is the lesson.** Gil watched
+  the screen and reported the sequence: Steam came up, a dialog asked *"Launch
+  Game with custom arguments"*, he clicked Continue, and the failure followed.
+  That dialog only appears when **Steam itself** is starting the game — i.e. it
+  was direct evidence that our process was not the one running it. Both of my
+  hypotheses (a `cp -f` inode hazard; something in the rebuilt DXMT) were wrong,
+  and both were about the thing I had just changed rather than about the
+  observation. **The user's description of what the screen did was worth more
+  than every log I read**, and the answer was already in this repo's own docs
+  (`RUNTIME.md` §9, "does not inherit our environment") — written down, but only
+  as a reason to prefer `-applaunch`, never as a constraint on backends.
+
+  Three controls in this session failed to detect what they were aimed at: the
+  6/6 flake test (warm Steam, wrong condition), the first `ps -M` parse (wrong
+  field mapping), and an `echo $?` after a pipeline (reported `head`'s status).
+  *A control that cannot fail is not a control* — the rule earned its place
+  again.
+
+  Retracted with it: **"DXMT rebuild verified running the game" was too broad.**
+  It verified the direct-launch path only; the `-applaunch` path was broken at
+  the time that was written.
 
 - **DXMT performance: first profile taken, no pathology.** Iron Nest in-game,
   `ps -M` on the game pid correlated with `sample`:
@@ -1260,6 +1277,28 @@ right call there.
   Steam loads it by full path, so that route cannot A/B it.
 
 ## Do not re-chase these (measured and refuted)
+
+- *"`BACKEND=` in the profile means the game is using that backend."* **No — not
+  for a Steam game (measured 2026-08-15).** The client spawns the game and
+  `WINEDLLOVERRIDES` does not cross that hand-off, so the game silently gets
+  wined3d. Check what actually loaded rather than what the profile says:
+
+  ```sh
+  WINEDEBUG=+loaddll bin/gamerun <profile> 2>&1 | grep -iE 'd3d11\.dll|dxgi'
+  # "native" = the backend is in the path. "builtin" = wined3d, and on macOS
+  # that means the game will fail outright (RUNTIME.md section 10).
+  ```
+
+  A Steam game needs `bin/backend-install --app '<Game.exe>'`. And if you see
+  Steam's **"Launch Game with custom arguments"** dialog, that is proof Steam
+  launched the process, not `gamerun` — so nothing from the profile environment
+  reached it.
+
+- *"An intermittent graphics failure is a race / a flaky backend."* This one was
+  neither. It reproduced perfectly once the launch path was the variable rather
+  than the timing. Before theorising about races, establish **which process
+  actually started the game** — Steam's `logs/gameprocess_log.txt` records every
+  launch with its full command line and is the fastest way to tell.
 
 - *"A D3D11 game failing on wined3d means something is wrong with our build / the
   prefix / that game."* **No — wined3d cannot do D3D11 on macOS at all

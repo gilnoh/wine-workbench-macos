@@ -10,10 +10,19 @@
 
 source "$(dirname "$0")/common.sh"
 
-BACKEND="${1:-}"
-PREFIX="${2:-}"
-RUNTIME="${3:-$DEFAULT_RUNTIME}"
-[ -n "$BACKEND" ] && [ -n "$PREFIX" ] || die "usage: backend-install <backend> <prefix> [runtime]"
+APP=""
+POS=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --app) APP="$2"; shift 2 ;;
+        *)     POS+=("$1"); shift ;;
+    esac
+done
+BACKEND="${POS[0]:-}"
+PREFIX="${POS[1]:-}"
+RUNTIME="${POS[2]:-$DEFAULT_RUNTIME}"
+[ -n "$BACKEND" ] && [ -n "$PREFIX" ] \
+    || die "usage: backend-install <backend> <prefix> [runtime] [--app '<Game.exe>']"
 
 SRC="$BACKENDS_DIR/$BACKEND"
 [ -d "$SRC" ] || die "no backend '$BACKEND' at $SRC"
@@ -109,4 +118,70 @@ if [ -d "$SRC/x86_64-unix" ]; then
     done
 fi
 
+# --- per-application overrides, for Steam games ---------------------------
+#
+# ⚠️ WHY THIS IS NOT OPTIONAL FOR A STEAM TITLE.
+#
+# BACKEND= in a profile works by putting WINEDLLOVERRIDES in the environment,
+# which is inherited down a process tree. But a Steam game's real parent is the
+# *Steam client*, not bin/gamerun -- either because the profile launches it with
+# `steam.exe -applaunch`, or because steam_api re-launches the exe through
+# steam://run/<appid> (the exit-53 path in docs/RUNTIME.md section 9). Neither
+# hand-off carries our environment, and profiles/steam.env sets BACKEND="none",
+# so the game comes up on wined3d no matter what the game's own profile says.
+#
+# On macOS that is fatal rather than merely slower: wined3d caps at feature
+# level 9_3 on MoltenVK, so D3D11 device creation fails outright with
+# 0x80004005 and the game shows "Failed to initialize graphics" (RUNTIME.md
+# section 10). MEASURED 2026-08-15 -- `bin/gamerun iron-nest` failed exactly
+# this way against a running client, having "worked" earlier only via direct
+# launches that happened not to be re-launched.
+#
+# Wine's per-application key is keyed on the executable, so it applies however
+# the process is started. It is checked before the global DllOverrides key
+# (dlls/ntdll/unix/loadorder.c). Verified with BACKEND=none and no environment
+# overrides at all: Direct3D 11.0 [level 11.1].
+if [ -n "$APP" ]; then
+    conf="$SRC/backend.conf"
+    [ -f "$conf" ] || die "--app needs $conf to know which DLLs to override"
+    BACKEND_OVERRIDES=""
+    # shellcheck disable=SC1090
+    source "$conf"
+    [ -n "$BACKEND_OVERRIDES" ] || die "$conf defines no BACKEND_OVERRIDES"
+
+    reg="$(mktemp -t backend-app)" || die "mktemp failed"
+    {
+        echo "REGEDIT4"
+        echo
+        echo "[HKEY_CURRENT_USER\\Software\\Wine\\AppDefaults\\$APP\\DllOverrides]"
+        # "dxgi,d3d11,d3d10core=n,b" -> one line per dll, n,b -> native,builtin
+        IFS=';' read -ra groups <<< "$BACKEND_OVERRIDES"
+        for g in "${groups[@]}"; do
+            dlls="${g%%=*}"; order="${g#*=}"
+            order="${order//n/native}"; order="${order//b/builtin}"
+            IFS=',' read -ra names <<< "$dlls"
+            for n in "${names[@]}"; do
+                [ -n "$n" ] && echo "\"$n\"=\"$order\""
+            done
+        done
+    } > "$reg"
+
+    info "registering per-app overrides for '$APP'"
+    sed -n '3,$p' "$reg" | sed 's/^/    /'
+    WINEPREFIX="$PFX" WINEMSYNC="${WINEMSYNC:-1}" "$RT/bin/wine" regedit "$reg" >/dev/null 2>&1 \
+        || die "regedit failed writing AppDefaults for '$APP'"
+    rm -f "$reg"
+
+    # Assert it landed. regedit exits 0 even when it writes nothing, and the
+    # registry is not flushed to user.reg while a wineserver is live -- so read
+    # it back through Wine rather than grepping the file.
+    got="$(WINEPREFIX="$PFX" WINEMSYNC="${WINEMSYNC:-1}" "$RT/bin/wine" reg query \
+             "HKCU\\Software\\Wine\\AppDefaults\\$APP\\DllOverrides" 2>/dev/null)"
+    case "$got" in
+        *native*) info "  verified in the prefix registry" ;;
+        *)        die "AppDefaults overrides for '$APP' are not readable back -- refusing to claim success" ;;
+    esac
+fi
+
 info "done. Select it with BACKEND=\"$BACKEND\" in the profile."
+[ -n "$APP" ] || info "NOTE: for a STEAM game, also run with --app '<Game.exe>' -- BACKEND= alone does not survive a Steam-launched process."
