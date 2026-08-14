@@ -27,17 +27,49 @@ SYSWOW="$PFX/drive_c/windows/syswow64"
 
 info "installing $BACKEND -> prefix:$PREFIX runtime:$RUNTIME"
 
+# Refuse to install underneath a live prefix. Installing a backend replaces DLLs
+# a running game has mapped; the docs already say not to delete a runtime or
+# prefix without checking for live processes, and this is the same hazard.
+if pgrep -f "$PREFIXES_DIR/$PREFIX/" >/dev/null 2>&1 \
+   || pgrep -f "$RUNTIMES_DIR/$RUNTIME/" >/dev/null 2>&1; then
+    die "processes are live on prefix '$PREFIX' or runtime '$RUNTIME'.
+  Installing now would swap DLLs underneath them. Stop them first:
+    bin/killwine        (NB: also kills a running CrossOver bottle)"
+fi
+
+# install_file <src> <destdir> -- atomically, via a temp name in the same
+# directory plus mv.
+#
+# NOT `cp -f`. cp opens the destination with O_TRUNC and rewrites it in place,
+# so the inode is preserved and every process that already has the old file
+# mmap'd sees its pages change underneath it. mv is a rename: the new content
+# gets a new inode and existing mappings keep pointing at the old one, which is
+# what you want for a file Wine maps into running processes.
+#
+# Added 2026-08-14 after a single unexplained failure -- the first launch after
+# a cp -f over winemetal.so came up with "d3d11: failed to create device and
+# context (80004005)" and the next launch of the same binaries was fine.
+# ⚠️ That is a HAZARD REMOVED, not a diagnosis: the failure was never
+# reproduced and this is not established as its cause. Do not record it as one.
+install_file() {
+    local src="$1" destdir="$2" base tmp
+    base="$(basename "$src")"
+    tmp="$destdir/.$base.new.$$"
+    cp -f "$src" "$tmp" || return 1
+    mv -f "$tmp" "$destdir/$base"
+}
+
 if [ -d "$SRC/x86_64-windows" ]; then
     for f in "$SRC/x86_64-windows"/*.dll; do
         [ -e "$f" ] || continue
-        cp -f "$f" "$SYS32/" && echo "    system32/$(basename "$f")"
+        install_file "$f" "$SYS32" && echo "    system32/$(basename "$f")"
     done
 fi
 
 if [ -d "$SRC/i386-windows" ] && [ -d "$SYSWOW" ]; then
     for f in "$SRC/i386-windows"/*.dll; do
         [ -e "$f" ] || continue
-        cp -f "$f" "$SYSWOW/" && echo "    syswow64/$(basename "$f")"
+        install_file "$f" "$SYSWOW" && echo "    syswow64/$(basename "$f")"
     done
 fi
 
@@ -62,14 +94,14 @@ if [ -d "$SRC/x86_64-unix" ]; then
     for f in "$SRC/x86_64-unix"/*.so; do
         [ -e "$f" ] || continue
         base="$(basename "$f")"
-        cp -f "$f" "$dest/" && echo "    RUNTIME x86_64-unix/$base"
+        install_file "$f" "$dest" && echo "    RUNTIME x86_64-unix/$base"
         echo "$base  <- $BACKEND  ($(date '+%Y-%m-%d %H:%M'))" \
             >> "$RT/.backend-installs"
 
         # The matching PE, if the backend ships one.
         pe="$SRC/x86_64-windows/${base%.so}.dll"
         if [ -e "$pe" ]; then
-            cp -f "$pe" "$RT/lib/wine/x86_64-windows/" \
+            install_file "$pe" "$RT/lib/wine/x86_64-windows" \
                 && echo "    RUNTIME x86_64-windows/$(basename "$pe")  (unixlib pair)"
             echo "$(basename "$pe")  <- $BACKEND, unixlib pair for $base  ($(date '+%Y-%m-%d %H:%M'))" \
                 >> "$RT/.backend-installs"

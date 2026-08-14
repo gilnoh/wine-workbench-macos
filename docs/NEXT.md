@@ -34,7 +34,72 @@
   DXMT being built against Wine 11.14 versus this runtime's 11.0 — that mismatch
   is fine, `winemetal.so` loads into 11.0 without complaint.
 
-- **⚠️ Backends have no provenance, and DXMT is currently not rebuildable.** Found
+- **DXMT is rebuildable, and now targets Wine 11.0.** `bin/build-backend dxmt`
+  builds `src/dxmt` against `build/<runtime>` and writes a `PROVENANCE` like a
+  runtime's. `backends/dxmt-0.80-winecx-26.3.0-sse` is the result, installed and
+  **verified running the game** (`Direct3D 11.0 [level 11.1]`, 6/6 cold launches).
+  Three of its five artifacts are byte-size identical to the 11.14-built ones;
+  only `winemetal.dll` differs, which is exactly the file generated against
+  `wine_build_path` — so the retarget changed the unixlib shim and nothing in the
+  D3D translation itself. `backends/dxmt-0.80` is kept as the fallback.
+
+  Two traps found by doing it, both worth more than the retarget:
+  - **the meson pin is load-bearing.** Homebrew's 1.10.1 dies configuring DXMT's
+    cross build with `KeyError: ... build.cpp_importstd` / "Unhandled python
+    exception". `build-backend` recreates `toolchains/venv-meson` at **1.9.1**
+    itself rather than trusting whatever is on `PATH`.
+  - **`toolchains/` was a third casualty of the checkout rename.** A venv's
+    scripts are shebanged with an absolute path to their own interpreter, so
+    `toolchains/venv-meson/bin/meson` had been dead since the rename. See
+    `AGENT_START_HERE.md`, "A built tree is not relocatable" — `toolchains/` is
+    now named there alongside runtimes, prefixes and build trees.
+
+- **⚠️ OPEN: one unexplained D3D11 init failure.** A single launch of the rebuilt
+  DXMT came up with `d3d11: failed to create device and context (80004005)`; the
+  next launch of the same binaries was fine, and **6/6 subsequent cold launches
+  passed**. So it is not a frequent flake. It is *not* explained.
+
+  Do not record the working theory as a cause. It is: `bin/backend-install` used
+  `cp -f`, which truncates and rewrites in place rather than replacing the inode,
+  so any process holding `winemetal.so` mapped sees its pages change underneath
+  it — and the failing run was the first launch after exactly that. `cp -f` is
+  now `cp` to a temp name + `mv` (atomic, new inode), and the script refuses to
+  install while processes are live on the prefix or runtime.
+
+  **The 6/6 result does not test that hypothesis.** All six launches ran against
+  an already-installed backend, so none of them reproduced the suspected trigger
+  (first launch after an install). A control that cannot reproduce the condition
+  cannot exonerate it. If it recurs, the thing to capture is `WINEDEBUG=+loaddll`
+  plus `DXMT_LOG_LEVEL=trace` *on the failing run* — the failure that started
+  this had neither.
+
+- **DXMT performance: first profile taken, no pathology.** Iron Nest in-game,
+  `ps -M` on the game pid correlated with `sample`:
+
+  | %CPU | PRI | thread |
+  | ---- | --- | ------ |
+  | 86.7 | 31T | main loop |
+  | 22.3 | **63R** | `dxmt-encode-thr` (Metal command encoding) |
+  | 11.4 | 31T | `Job.Worker 1` |
+  | 11.1 | 31T | `UnityGfxDeviceWorker` |
+  | 5.1 | **63R** | `FMOD mixer thread` |
+
+  Process totals `utime 1:52.80 / stime 0:28.55` (~80% userspace) over 93–96
+  threads. **Nothing is spinning**, and both realtime-band threads stay in `63R`
+  rather than being demoted to `63T` — the exact inverse of the dsound
+  pathology in section 4 of `RUNTIME.md`. The higher system-time share than
+  Strategic Command's 98.8% userspace is expected: Metal command submission is
+  syscalls, and SC is a 2D title.
+
+  ⚠️ Caveat on the names: `ps -M` saw 93 threads and `sample` 97, so the index
+  alignment can be off by a few and the names are **indicative, not measured**.
+  The two `63R` rows are the trustworthy ones — realtime-band rows are rare and
+  the names landing on them are the two subsystems that deserve that band. A
+  clean correlation needs both captures on a quiescent process.
+
+- **⚠️ Backends had no provenance, and DXMT was not rebuildable.** Fixed above by
+  `bin/build-backend`; kept here because the *shape* of the gap is the lesson.
+  Found
   while asking the reasonable question *"should we retarget DXMT at 11.0?"* — the
   retarget is the cheap half. Measured state:
 
@@ -45,13 +110,15 @@
   | the build command | **only in `build/dxmt-build2.log`** — gitignored, and prose in `backend.conf`, which is gitignored too (`/backends/*/`) |
   | `wine_build_path` it used | `/Users/<user>/games/build/wine-11.14-x86_64` — the **pre-rename** path, and that tree is **deleted** |
 
-  So a clean checkout cannot produce a backend at all, and if
-  `backends/dxmt-0.80/` is ever lost, the D3D11 capability proved on 2026-08-14
-  goes with it. Every runtime carries a `PROVENANCE`; backends carry nothing
-  equivalent. **The fix is a recipe, not a rebuild** — and once there is one, its
-  natural `wine_build_path` is `build/winecx-26.3.0-sse-x86_64` (present and
-  usable), so retargeting DXMT at Wine 11.0 falls out for free rather than being
-  its own task. Do not plan them separately.
+  A clean checkout could not produce a backend at all, and losing
+  `backends/dxmt-0.80/` would have taken the D3D11 capability with it. Every
+  runtime carried a `PROVENANCE`; backends carried nothing equivalent. **The fix
+  was a recipe, not a rebuild** — and once there was one, its natural
+  `wine_build_path` was `build/winecx-26.3.0-sse-x86_64`, so the Wine 11.0
+  retarget fell out for free rather than being its own task. Worth remembering
+  the shape of that: the question asked was "should we retarget?", and the
+  retarget turned out to be five minutes of a job whose real content was that
+  the thing could not be built at all.
 
 - **Runtime:** `runtimes/winecx-26.3.0-sse-x86_64` — WineCX 26.3.0 (CrossOver 26.3.0 =
   Wine 11.0), built with `--pe-gcc`. It is `DEFAULT_RUNTIME` and is named in every
