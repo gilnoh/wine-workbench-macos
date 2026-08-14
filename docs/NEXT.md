@@ -1,15 +1,31 @@
 # Continue here
 
 > **New session?** Read `README.md` for what this project is, then
-> `AGENT_START_HERE.md` for how to operate it — both are durable and do not change.
+> `AGENT_START_HERE.md` for how to operate it, then **`RUNTIME.md` — §9 and §10
+> in particular**. Those two sections encode a rule that is invisible until it
+> bites and then costs a session: wined3d cannot do D3D11 on this platform at
+> all, and `BACKEND=` in a profile does not reach a Steam-launched game. All
+> three files are durable and do not change.
 > **This file is the only one that tracks current state**, so it is where anything
 > time-varying belongs: what is working now, what is open, and what has been refuted.
 
-## Current state (2026-08-14)
+## Current state (2026-08-15)
 
 - **Three games play.** Strategic Command WWII (32-bit, wined3d), **IRON NEST:
   Heavy Turret Simulator** (64-bit Unity 6 / D3D11, **DXMT**) and **XCOM:
-  Chimera Squad** (64-bit Unreal Engine 3 / D3D11, **DXMT**). The D3D11 class is
+  Chimera Squad** (64-bit Unreal Engine 3 / D3D11, **DXMT**).
+
+  Strategic Command was **re-verified after the AppDefaults work** (2026-08-15),
+  because "nothing I changed should touch it" is reasoning, not measurement. Its
+  registry carries only `AppDefaults\SC3-WWII War in Europe.exe\Explorer`
+  (the virtual desktop, from July) and **no `DllOverrides`**, so it is untouched
+  by design as well as in fact. The .NET `Launcher.exe` came up, PLAY worked,
+  and the profile matches the healthy signature recorded below almost exactly:
+  **100.7% total CPU, `utime 0:16.47 / stime 0:00.68` (96% userspace), one busy
+  thread at 100% (`31T`, the main loop), audio mixer at 1.5% and still in the
+  realtime band** rather than demoted to `T`. That last detail is the one that
+  distinguished the fixed x87 build from the broken one, so it is the check
+  worth repeating after any change to the runtime or the prefix. The D3D11 class is
   therefore open, and the finding that opened it is durable enough to live in
   `RUNTIME.md` §10 rather than here:
 
@@ -232,11 +248,26 @@ failed exactly as predicted, with UE3's own wording — *"Minimum of DirectX 11
 Required."* — and one registry key fixed it.
 
 What is genuinely open in DXMT now, in cost order:
-  - **A genuinely heavy title.** Both games so far are low-load; neither
-    pushes the GPU. Nothing here has found a DXMT *performance* limit
-    because nothing has looked for one. Doom Eternal is Vulkan-only (id Tech 7)
-    and so tests winevulkan → MoltenVK instead, a different and also-untested
-    axis.
+  - **A genuinely demanding title — and "demanding" does not mean "pretty".**
+    DXMT is a translation layer, so what stresses it is *translation work*, not
+    pixels. In rough order of how likely each is to find a limit:
+
+    | pressure | why it hurts DXMT | shows up as |
+    | -------- | ----------------- | ----------- |
+    | **draw-call volume** | every D3D11 draw becomes Metal encoding on the CPU | `dxmt-encode-thr` pinned near 100% (it sat at 20–22% in both games so far) |
+    | **shader variety** | DXBC → Metal AIR is compiled on first sight | hitching, not low average framerate |
+    | **deferred contexts** | D3D11 multithreaded rendering, the classic weak spot in every translation layer | outright failure or a fallback path |
+    | **resource churn** | streaming worlds creating/destroying textures constantly | stalls, memory growth |
+
+    Both games tested so far are turn-based with static scenes — close to the
+    gentlest possible D3D11 workload — so **no DXMT performance limit has been
+    found here because none has been looked for.** Want an open-world or
+    large-scale strategy title; a corridor shooter would look impressive and
+    prove less. The `ps -M` method already detects both tells.
+
+    Note **Doom Eternal is not this test** — id Tech 7 is Vulkan-only, so it
+    bypasses DXMT entirely and exercises winevulkan → MoltenVK. That is a third
+    untested axis and worth doing on its own terms, not as a DXMT benchmark.
   - **`ID3D11Fence` is not implemented** — `GpuFence::Create(): Failed to create
     ID3D11Fence, error 0x80004005` in Unity's log. Non-fatal here (Unity carried on
     and the mission played), but it is a real gap and a title that needs fences will
