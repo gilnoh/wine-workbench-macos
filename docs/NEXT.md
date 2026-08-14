@@ -201,6 +201,23 @@ Unity/D3D11 too and would reproduce the same `0x9300` log line for line. Install
 when you want to *play* them, or as breadth-testing for DXMT; there is no open
 question left that they are the cheapest way to answer.
 
+**The D3D12 question is separate and unanswered.** DXMT is D3D10/11; nothing here
+has established how far **D3D12** gets. What is measured so far, from the Iron
+Nest session: vkd3d enumerates the real adapter and reports **feature level
+11.0** — much healthier than wined3d's 9_3 — but `D3D11On12CreateDevice` is an
+`E_NOTIMPL` stub in the CX tree, so a Unity D3D12 build cannot build its interop
+device. Neither of those facts tells us whether a natively-D3D12 game renders.
+
+The probe to use is **Clair Obscur: Expedition 33** (UE5, D3D12-only, 64-bit) —
+Gil's suggestion, and the right one: it is D3D12 with no D3D11 fallback, so it
+cannot silently take the path we already understand. Expect it to fail: UE5
+generally wants feature level 12_0 / SM6 and vkd3d is reporting 11.0. That
+failure would still be worth having, because *"D3D12 reaches feature level 11.0
+and here is the specific thing that stops it"* is a measurement, and
+*"D3D12 probably doesn't work"* is not. ⚠️ Check ownership first — unlike XCOM 2
+and Chimera Squad, appid 1903340 does not appear in the prefix's
+`userdata/*/config/localconfig.vdf`.
+
 What is genuinely open in DXMT now, in cost order:
   - **Breadth.** One game at feature level 11.1 is one data point. Iron Nest is a
     modest Unity 6 title; something heavier would exercise more of DXMT.
