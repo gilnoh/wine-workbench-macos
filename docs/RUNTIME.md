@@ -521,3 +521,75 @@ Also note Steam creates a `SteamLibrary/steamapps/` tree under whatever mount
 point is registered, so the shared library path is `S:\SteamLibrary\steamapps\`.
 Mounting `S:` is not enough on its own — the drive must be added in the client
 (Settings > Storage > '+'), or games install into the prefix instead.
+
+A `*-direct.env` debug profile needs a **`steam_appid.txt`** in the game
+directory containing the appid, or the exe exits 53 as described above even with
+the client already online. Both games here have one.
+
+## 10. D3D11 on macOS: wined3d cannot do it, and never will
+
+**Measured 2026-08-14, on WineCX 26.3.0 with Iron Nest (Unity 6, D3D11).** This
+is a property of the platform, not of a game or of our build, so it belongs
+here rather than in `NEXT.md`.
+
+wined3d does select the Vulkan renderer on macOS — that is CodeWeavers'
+`CW HACK 18311` in `dlls/wined3d/directx.c:3531`, which tries
+`wined3d_adapter_vk_create` first and logs
+`err:winediag:wined3d_adapter_create Using the Vulkan renderer for d3d10/11
+applications.` It gets a real adapter, correctly identified
+(`Apple M1 Max`, `106b:1a050207`, 64 GB). And it is still useless for D3D11:
+
+```
+trace:d3d:wined3d_driver_info_init GPU maximum feature level 0x9300     <- 9_3
+fixme:winediag:wined3d_select_feature_level None of the requested D3D feature
+    levels is supported on this GPU with the current shader backend.
+```
+
+`wined3d_state_create` (`dlls/wined3d/stateblock.c:2450`) returns `E_FAIL` when
+no requested level is `<=` the adapter's, so `D3D11CreateDevice` fails with
+`0x80004005` for any application asking for 10_0 or above — which is all of
+them.
+
+The cap comes from `feature_level_10_supported()` (`adapter_vk.c:2213`), and
+three of its eleven required Vulkan features are missing in MoltenVK. Measured
+with `vulkaninfo` against the x86_64 MoltenVK the runtime bundles (the bundled
+copy differs from `/usr/local/opt/molten-vk`'s by 1056 bytes, all
+`install_name_tool` re-pathing, so the query is representative):
+
+| feature | MoltenVK | needed for FL 10 |
+| ------- | -------- | ---------------- |
+| `geometryShader` | **false** | yes |
+| `pipelineStatisticsQuery` | **false** | yes |
+| `shaderCullDistance` | **false** | yes |
+| the other eight | true | yes |
+
+**`geometryShader` will never become true** — Metal has no geometry-shader
+stage. So this is not a version problem to wait out.
+
+**Consequence: every D3D10/11 title needs a translation layer.** For this
+workbench that means DXMT, and it is a requirement rather than a performance
+option. With `BACKEND="dxmt-0.80"` the same game reports
+`Direct3D 11.0 [level 11.1]` and plays.
+
+### D3D12 is not an escape hatch either
+
+Forcing Unity to D3D12 (`-force-d3d12`) gets further than expected — vkd3d
+reports **feature level 11.0**, well above wined3d's 9_3 — but Unity's D3D12
+backend then needs the D3D11-on-12 interop device, and
+
+```
+dlls/d3d11/d3d11_main.c:381   D3D11On12CreateDevice   FIXME "... stub!"  -> E_NOTIMPL
+```
+
+is a stub in CrossOver's tree, so it fails with `0x80004001` and Unity falls
+back to plain D3D11, which fails as above.
+
+### The DXMT packaging trap
+
+DXMT had never once loaded here, and the reason was ours, not DXMT's: a
+**unixlib's PE half must be installed into the runtime as well as the prefix.**
+Full mechanism and the misleading error message are in `backends/README.md`;
+`bin/backend-install` now handles it. Worth stating the refuted hypothesis too —
+DXMT 0.80 is built against Wine 11.14 and this runtime is Wine 11.0, and that
+mismatch was *predicted to be the blocker and was not*: `winemetal.so` loads
+into the 11.0 runtime without complaint.

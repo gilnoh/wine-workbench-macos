@@ -5,11 +5,58 @@
 > **This file is the only one that tracks current state**, so it is where anything
 > time-varying belongs: what is working now, what is open, and what has been refuted.
 
-## Current state (2026-08-01)
+## Current state (2026-08-14)
+
+- **Two games play.** Strategic Command WWII (32-bit, wined3d) and **IRON NEST:
+  Heavy Turret Simulator** (64-bit Unity 6 / D3D11, **DXMT**) — the latter added
+  2026-08-14, first mission played through, reported working well. The D3D11
+  class is therefore open, and the finding that opened it is durable enough to
+  live in `RUNTIME.md` §10 rather than here:
+
+  > **wined3d cannot create a D3D11 device on macOS, for any game, ever.**
+  > MoltenVK reports `geometryShader` / `pipelineStatisticsQuery` /
+  > `shaderCullDistance` = false; `adapter_vk.c:2213` needs all three for
+  > feature level 10; the adapter caps at **9_3** and `D3D11CreateDevice`
+  > returns `E_FAIL`. Metal has no geometry-shader stage, so waiting does not
+  > fix it. **DXMT is a requirement for D3D10/11 titles, not an optimisation.**
+
+  Also settled on the way: D3D12 is not an alternative either —
+  `D3D11On12CreateDevice` is an `E_NOTIMPL` stub in the CX tree, so Unity's D3D12
+  backend cannot build its interop device. (vkd3d itself reports feature level
+  11.0, much healthier than wined3d's 9_3.)
+
+- **`bin/backend-install` had a real bug, now fixed:** a unixlib's PE half must be
+  installed into the **runtime**, not only the prefix, or Wine cannot pair
+  `winemetal.dll` with `winemetal.so` and the process dies at startup with
+  `err:module:loader_init "winemetal.dll" failed to initialize` / `c0000142`.
+  This is why `backends/dxmt-0.80` had never loaded once. Mechanism in
+  `backends/README.md`. **Refuted while chasing it:** the predicted blocker was
+  DXMT being built against Wine 11.14 versus this runtime's 11.0 — that mismatch
+  is fine, `winemetal.so` loads into 11.0 without complaint.
+
+- **⚠️ Backends have no provenance, and DXMT is currently not rebuildable.** Found
+  while asking the reasonable question *"should we retarget DXMT at 11.0?"* — the
+  retarget is the cheap half. Measured state:
+
+  | | |
+  | - | - |
+  | upstream source | `src/dxmt`, tag **v0.80**, commit `589adb7` — pinned, but `src/` is gitignored |
+  | our delta | `patches/dxmt-0001-include-iomanip.patch`, in `patches/series` (class `fix`), and the working tree matches it exactly ✅ |
+  | the build command | **only in `build/dxmt-build2.log`** — gitignored, and prose in `backend.conf`, which is gitignored too (`/backends/*/`) |
+  | `wine_build_path` it used | `/Users/<user>/games/build/wine-11.14-x86_64` — the **pre-rename** path, and that tree is **deleted** |
+
+  So a clean checkout cannot produce a backend at all, and if
+  `backends/dxmt-0.80/` is ever lost, the D3D11 capability proved on 2026-08-14
+  goes with it. Every runtime carries a `PROVENANCE`; backends carry nothing
+  equivalent. **The fix is a recipe, not a rebuild** — and once there is one, its
+  natural `wine_build_path` is `build/winecx-26.3.0-sse-x86_64` (present and
+  usable), so retargeting DXMT at Wine 11.0 falls out for free rather than being
+  its own task. Do not plan them separately.
 
 - **Runtime:** `runtimes/winecx-26.3.0-sse-x86_64` — WineCX 26.3.0 (CrossOver 26.3.0 =
   Wine 11.0), built with `--pe-gcc`. It is `DEFAULT_RUNTIME` and is named in every
-  profile. Built from `src/crossover/sources/wine`, which is its own git repo: pristine
+  profile. It now also carries DXMT's `winemetal.{dll,so}`, recorded in its
+  `.backend-installs`. Built from `src/crossover/sources/wine`, which is its own git repo: pristine
   tarball on branch `vendor` at tag `winecx-26.3.0`, our work on `games`.
 - **Prefix:** `prefixes/steam-winecx`, an APFS clone of `steam-base` with `wineboot -u`
   run on it — which preserved the Steam login and the `S:` library registration, the two
@@ -39,12 +86,14 @@
     ~25 minutes.
 
 **Working:** Steam renders and logs in; Strategic Command WWII reaches its menu with
-real-time menu response, clean audio and smooth loading, and plays a turn.
+real-time menu response, clean audio and smooth loading, and plays a turn; Iron Nest
+runs on DXMT at feature level 11.1 and plays a mission.
 
 ## Next: the four directions on the table
 
-Chosen for the next session: **the other two games** (3). Everything here is a live
-option, not a backlog — pick by what you want to learn.
+Item 3 is **done, and it answered a bigger question than it asked** (see Current
+state). Everything here is a live option, not a backlog — pick by what you want to
+learn.
 
 **1. Play Strategic Command and polish.** The environment works; find the remaining minor
 issues. Cheap, and it carries a free measurement with it: **the 2 s → 20 s menu fade is
@@ -59,11 +108,28 @@ dies with `1053`. Well-scoped, and there is a **reference oracle** — check whe
 gamepads work in the CrossOver bottle. If they do, their build avoids it and the
 difference is findable. Unlocks a class of games (Sekiro and similar).
 
-**3. ▶ NEXT — Quasimorph and Battleship Command.** Both 64-bit Unity/D3D11, so **DXMT
-territory**: they do not go near WoW64, GDI, dsound or any 32-bit path this project has
-worked on. About an hour to try, and the highest information per hour on this list —
-either the base generalises to a completely different code path, or the next class of
-problem surfaces cheaply. `backends/dxmt-0.80` is already built and unused so far.
+**3. ✅ DONE (2026-08-14) — the D3D11 class, via Iron Nest.** It was the highest
+information per hour on the list, as expected, but not in the expected way: the
+result was not "does this game work" but *"wined3d can never do D3D11 here, so DXMT
+is mandatory"* (Current state, and `RUNTIME.md` §10). **Quasimorph and Battleship
+Command no longer need to be tried to answer that question** — they are 64-bit
+Unity/D3D11 too and would reproduce the same `0x9300` log line for line. Install them
+when you want to *play* them, or as breadth-testing for DXMT; there is no open
+question left that they are the cheapest way to answer.
+
+What is genuinely open in DXMT now, in cost order:
+  - **Breadth.** One game at feature level 11.1 is one data point. Iron Nest is a
+    modest Unity 6 title; something heavier would exercise more of DXMT.
+  - **`ID3D11Fence` is not implemented** — `GpuFence::Create(): Failed to create
+    ID3D11Fence, error 0x80004005` in Unity's log. Non-fatal here (Unity carried on
+    and the mission played), but it is a real gap and a title that needs fences will
+    notice.
+  - **DXMT 0.80 is built against Wine 11.14, not the CX tree.** It works anyway, so
+    this is hygiene rather than a bug — but the rebuild against
+    `src/crossover/sources/wine` is the thing that makes the backend reproducible
+    from this repo alone.
+  - **Performance is unmeasured.** Nothing here has profiled a DXMT title; the
+    `ps -M` / phase-matching method from the dsound work applies directly.
 
 **4. Task Force Admiral + `wine_mesa_gl`.** The reason the workbench exists. The bridge
 (GL → Mesa/zink → Vulkan → Metal) already runs with rough edges as its own project; what
@@ -1127,6 +1193,33 @@ right call there.
   Steam loads it by full path, so that route cannot A/B it.
 
 ## Do not re-chase these (measured and refuted)
+
+- *"A D3D11 game failing on wined3d means something is wrong with our build / the
+  prefix / that game."* **No — wined3d cannot do D3D11 on macOS at all
+  (measured 2026-08-14).** The adapter caps at feature level **9_3** because
+  MoltenVK lacks `geometryShader`, `pipelineStatisticsQuery` and
+  `shaderCullDistance`, so `D3D11CreateDevice` returns `E_FAIL` (`0x80004005`)
+  for every application. Do not debug this per-game and do not look for a
+  wined3d fix — use DXMT. Full chain in `RUNTIME.md` §10. The one-line check:
+
+  ```sh
+  WINEDEBUG=+d3d bin/gamerun <profile> 2>&1 | grep 'maximum feature level'
+  # 0x9300 = the cap. Nothing above 9_3 will ever be granted by wined3d here.
+  ```
+
+- *"Forcing D3D12 gets around it."* **No.** `D3D11On12CreateDevice` is an
+  `E_NOTIMPL` stub in the CX tree (`dlls/d3d11/d3d11_main.c:381`), so a Unity
+  D3D12 build fails at interop-device creation (`0x80004001`) and falls back to
+  the D3D11 path above. Note vkd3d itself is healthy — it reports feature level
+  11.0 — so this is a missing interop shim, not a Vulkan limitation.
+
+- *"DXMT does not load because it was built against Wine 11.14 and the runtime is
+  Wine 11.0."* **Refuted 2026-08-14 — that mismatch is fine.** `winemetal.so`
+  loads into the 11.0 runtime without complaint. The actual fault was our
+  packaging: `bin/backend-install` installed the PE half only into the prefix,
+  and Wine derives a unixlib's path from the **builtin** PE in the runtime tree.
+  Fixed; see `backends/README.md`. Recorded because the ABI story is the
+  plausible-sounding explanation and it is wrong.
 
 - *"The `NSWindow should only be instantiated on the main thread!` exception is a
   WineCX problem."* **No — it is ours, and the mechanism is measured (2026-07-31).**
