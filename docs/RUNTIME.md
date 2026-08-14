@@ -604,14 +604,41 @@ installed. It writes the registry through the running wineserver and copies no
 DLLs, so unlike a full install it is safe against a live prefix and needs no
 Steam restart.
 
-### Steam swallows an `-applaunch` sent too soon after login
+### An `-applaunch` sent too soon after login can be swallowed
 
 Measured twice on 2026-08-15: a `steam.exe -applaunch <appid>` issued ~5 s after
-the client logs in produces **nothing at all** — no game process, and no entry in
-`logs/gameprocess_log.txt`. It is not an error and there is no feedback; the
-request is simply dropped. Wait for the client to settle, and confirm a launch
-actually happened by looking for the `adding PID … as a tracked process` line in
-that log rather than assuming the command took.
+an **already-running** client finished logging in produced **nothing at all** —
+no game process, no entry in `logs/gameprocess_log.txt`, no error. The request
+was simply dropped.
+
+⚠️ But this is not universal, and an earlier version of this section said
+"silently drops" flatly, which overstates it. When **no client is running**,
+`bin/gamerun <game>` starts one and the launch is *queued*, firing correctly once
+the bootstrap finishes — verified 2026-08-15 with a launch that sat for ~2
+minutes and then ran. The failing case is specifically "client already up and
+just logged in"; the working case is "client not running at all".
+
+Either way, do not assume the command took: confirm with the
+`adding PID … as a tracked process` line in `logs/gameprocess_log.txt`.
+
+### A cold Steam start in this prefix takes about two minutes
+
+And it looks like a hang while it does, because most of it is
+`Verifying all executable checksums` in `logs/bootstrap_log.txt` — **I/O-bound,
+so the process sits near 0% CPU**. Do not read low CPU as "stuck" here; that
+mistake was made on 2026-08-15 and the client came up fine a minute later.
+
+The distinction that actually separates working from hung, for any process in
+this workbench, is **accumulated CPU time, not instantaneous `%CPU`**:
+
+```sh
+ps -o pid=,%cpu=,etime=,utime=,stime= -p <pid>
+# utime+stime climbing in step with etime = busy, whatever %CPU says
+```
+
+`ps`'s `%CPU` on macOS is a decaying average and reads low for a process that is
+genuinely working — a game 33 s into loading showed `13.9%` while having burned
+31 s of CPU in those 33 s.
 
 ## 10. D3D11 on macOS: wined3d cannot do it, and never will
 
