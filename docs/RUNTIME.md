@@ -579,6 +579,40 @@ client → `Direct3D 11.0 [level 11.1]`.
 > Setting `BACKEND=` in its profile is necessary for direct launches and not
 > sufficient for anything Steam starts.
 
+**Confirmed across engines, which is what makes the rule trustworthy.** The
+same before/after on XCOM: Chimera Squad (Unreal Engine 3), a title that got
+none of Iron Nest's debugging:
+
+| | AppDefaults key | outcome |
+| - | --------------- | ------- |
+| Iron Nest (Unity 6) | absent | `d3d11: failed to create device and context (80004005)` |
+| Chimera Squad (UE3) | absent | **"Minimum of DirectX 11 Required."**, process idles at 0–1% CPU |
+| either | present | runs — 11.1 / 2K logo, fullscreen, ~158% CPU |
+
+Two different engines phrase the failure differently and fail for one reason.
+
+⚠️ **The key goes on the executable that creates the D3D device**, which is not
+always the one you first see. Chimera Squad ships `Launcher/launcher.exe`
+alongside `Binaries/Win64/XCom.exe`; the key belongs on `XCom.exe`. (2K have
+since removed that launcher — see `2kLauncherRemoved.txt` in the game directory
+— but the trap stands for any title with a launcher, and a launcher that ships
+`QtWebEngineProcess.exe` is Chromium, i.e. the same class as the
+`steamwebhelper` black-window problem.)
+
+Use `--app-only` to register a further game against a backend that is already
+installed. It writes the registry through the running wineserver and copies no
+DLLs, so unlike a full install it is safe against a live prefix and needs no
+Steam restart.
+
+### Steam swallows an `-applaunch` sent too soon after login
+
+Measured twice on 2026-08-15: a `steam.exe -applaunch <appid>` issued ~5 s after
+the client logs in produces **nothing at all** — no game process, and no entry in
+`logs/gameprocess_log.txt`. It is not an error and there is no feedback; the
+request is simply dropped. Wait for the client to settle, and confirm a launch
+actually happened by looking for the `adding PID … as a tracked process` line in
+that log rather than assuming the command took.
+
 ## 10. D3D11 on macOS: wined3d cannot do it, and never will
 
 **Measured 2026-08-14, on WineCX 26.3.0 with Iron Nest (Unity 6, D3D11).** This

@@ -2,6 +2,14 @@
 # Install a graphics backend's libraries into a prefix (and its runtime).
 #
 #   bin/backend-install <backend> <prefix> [runtime]
+#   bin/backend-install <backend> <prefix> [runtime] --app '<Game.exe>'
+#   bin/backend-install <backend> <prefix> [runtime] --app '<Game.exe>' --app-only
+#
+# A STEAM game needs --app: BACKEND= in a profile does not survive the Steam
+# client hand-off, so the backend is really selected by a per-application
+# registry key. See docs/RUNTIME.md section 9. --app-only registers that key
+# without touching DLLs, which is safe against a live prefix -- use it to add a
+# second game to a backend that is already installed, without stopping Steam.
 #
 # PE DLLs go into the prefix's system32, so each prefix picks its own backend.
 # Unix-side libraries (*.so) must live in the runtime tree instead -- Wine only
@@ -11,18 +19,25 @@
 source "$(dirname "$0")/common.sh"
 
 APP=""
+APP_ONLY=0
 POS=()
 while [ $# -gt 0 ]; do
     case "$1" in
-        --app) APP="$2"; shift 2 ;;
-        *)     POS+=("$1"); shift ;;
+        --app)      APP="$2"; shift 2 ;;
+        # Register the per-app override only, skipping the DLL copy. Safe against
+        # a LIVE prefix -- the registry goes through the running wineserver,
+        # whereas replacing mapped DLLs does not. Use it to add a second game to
+        # a backend that is already installed, without stopping Steam.
+        --app-only) APP_ONLY=1; shift ;;
+        *)          POS+=("$1"); shift ;;
     esac
 done
+[ "$APP_ONLY" = 0 ] || [ -n "$APP" ] || die "--app-only requires --app '<Game.exe>'"
 BACKEND="${POS[0]:-}"
 PREFIX="${POS[1]:-}"
 RUNTIME="${POS[2]:-$DEFAULT_RUNTIME}"
 [ -n "$BACKEND" ] && [ -n "$PREFIX" ] \
-    || die "usage: backend-install <backend> <prefix> [runtime] [--app '<Game.exe>']"
+    || die "usage: backend-install <backend> <prefix> [runtime] [--app '<Game.exe>'] [--app-only]"
 
 SRC="$BACKENDS_DIR/$BACKEND"
 [ -d "$SRC" ] || die "no backend '$BACKEND' at $SRC"
@@ -34,13 +49,17 @@ RT="$RUNTIMES_DIR/$RUNTIME"
 SYS32="$PFX/drive_c/windows/system32"
 SYSWOW="$PFX/drive_c/windows/syswow64"
 
-info "installing $BACKEND -> prefix:$PREFIX runtime:$RUNTIME"
+if [ "$APP_ONLY" = 1 ]; then
+    info "registering '$APP' against $BACKEND in prefix:$PREFIX (no DLL copy)"
+else
+    info "installing $BACKEND -> prefix:$PREFIX runtime:$RUNTIME"
+fi
 
 # Refuse to install underneath a live prefix. Installing a backend replaces DLLs
 # a running game has mapped; the docs already say not to delete a runtime or
 # prefix without checking for live processes, and this is the same hazard.
-if pgrep -f "$PREFIXES_DIR/$PREFIX/" >/dev/null 2>&1 \
-   || pgrep -f "$RUNTIMES_DIR/$RUNTIME/" >/dev/null 2>&1; then
+if [ "$APP_ONLY" = 0 ] && { pgrep -f "$PREFIXES_DIR/$PREFIX/" >/dev/null 2>&1 \
+   || pgrep -f "$RUNTIMES_DIR/$RUNTIME/" >/dev/null 2>&1; }; then
     die "processes are live on prefix '$PREFIX' or runtime '$RUNTIME'.
   Installing now would swap DLLs underneath them. Stop them first:
     bin/killwine        (NB: also kills a running CrossOver bottle)"
@@ -68,14 +87,14 @@ install_file() {
     mv -f "$tmp" "$destdir/$base"
 }
 
-if [ -d "$SRC/x86_64-windows" ]; then
+if [ "$APP_ONLY" = 0 ] && [ -d "$SRC/x86_64-windows" ]; then
     for f in "$SRC/x86_64-windows"/*.dll; do
         [ -e "$f" ] || continue
         install_file "$f" "$SYS32" && echo "    system32/$(basename "$f")"
     done
 fi
 
-if [ -d "$SRC/i386-windows" ] && [ -d "$SYSWOW" ]; then
+if [ "$APP_ONLY" = 0 ] && [ -d "$SRC/i386-windows" ] && [ -d "$SYSWOW" ]; then
     for f in "$SRC/i386-windows"/*.dll; do
         [ -e "$f" ] || continue
         install_file "$f" "$SYSWOW" && echo "    syswow64/$(basename "$f")"
@@ -98,7 +117,7 @@ fi
 # which reads like a broken or mismatched backend build rather than a missing
 # file. Measured 2026-08-14: DXMT would not load at all until winemetal.dll was
 # placed here as well, and it worked immediately afterwards.
-if [ -d "$SRC/x86_64-unix" ]; then
+if [ "$APP_ONLY" = 0 ] && [ -d "$SRC/x86_64-unix" ]; then
     dest="$RT/lib/wine/x86_64-unix"
     for f in "$SRC/x86_64-unix"/*.so; do
         [ -e "$f" ] || continue

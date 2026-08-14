@@ -7,11 +7,11 @@
 
 ## Current state (2026-08-14)
 
-- **Two games play.** Strategic Command WWII (32-bit, wined3d) and **IRON NEST:
-  Heavy Turret Simulator** (64-bit Unity 6 / D3D11, **DXMT**) — the latter added
-  2026-08-14, first mission played through, reported working well. The D3D11
-  class is therefore open, and the finding that opened it is durable enough to
-  live in `RUNTIME.md` §10 rather than here:
+- **Three games play.** Strategic Command WWII (32-bit, wined3d), **IRON NEST:
+  Heavy Turret Simulator** (64-bit Unity 6 / D3D11, **DXMT**) and **XCOM:
+  Chimera Squad** (64-bit Unreal Engine 3 / D3D11, **DXMT**). The D3D11 class is
+  therefore open, and the finding that opened it is durable enough to live in
+  `RUNTIME.md` §10 rather than here:
 
   > **wined3d cannot create a D3D11 device on macOS, for any game, ever.**
   > MoltenVK reports `geometryShader` / `pipelineStatisticsQuery` /
@@ -218,9 +218,25 @@ and here is the specific thing that stops it"* is a measurement, and
 and Chimera Squad, appid 1903340 does not appear in the prefix's
 `userdata/*/config/localconfig.vdf`.
 
+**Breadth: done once, and it paid (2026-08-15).** XCOM: Chimera Squad (appid
+882100, 15 GB, UE3, D3D11) runs on DXMT — **several turns of the tutorial mission played**, audio clean, ~158% CPU with the
+same healthy thread signature (one busy main thread, the realtime-band encode
+thread staying in `R` rather than being demoted). Chosen for **engine diversity
+over raw load**, which turned out to be the right axis: it is what proved the
+AppDefaults rule generalises rather than being tuned to Unity. Profile:
+`profiles/chimera-squad.env`.
+
+It also validated the whole workflow on a game with no prior debugging:
+install → profile → `bin/backend-install --app 'XCom.exe'` → run. First launch
+failed exactly as predicted, with UE3's own wording — *"Minimum of DirectX 11
+Required."* — and one registry key fixed it.
+
 What is genuinely open in DXMT now, in cost order:
-  - **Breadth.** One game at feature level 11.1 is one data point. Iron Nest is a
-    modest Unity 6 title; something heavier would exercise more of DXMT.
+  - **A genuinely heavy title.** Both games so far are low-load; neither
+    pushes the GPU. Nothing here has found a DXMT *performance* limit
+    because nothing has looked for one. Doom Eternal is Vulkan-only (id Tech 7)
+    and so tests winevulkan → MoltenVK instead, a different and also-untested
+    axis.
   - **`ID3D11Fence` is not implemented** — `GpuFence::Create(): Failed to create
     ID3D11Fence, error 0x80004005` in Unity's log. Non-fatal here (Unity carried on
     and the mission played), but it is a real gap and a title that needs fences will
