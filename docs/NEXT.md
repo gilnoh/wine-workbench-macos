@@ -261,10 +261,28 @@ that read zero. The first `dinputprobe` printed only X/Y/Z/Rz and made the right
 look dead; SDL puts it on Rx/Ry. Fixed, and the fixed probe shows Rx/Ry centred at
 32767 with Rz genuinely unused.
 
-**Next: a game.** **Sekiro is not installed** (appid 814380; it *is* in the prefix's
-`localconfig.vdf`, so ownership is fine) — ~15 GB, D3D11, so DXMT territory. Elden Ring
-(1245620) is also owned and also D3D11. Sekiro is XInput-only for controllers, and
-XInput is the half that is most thoroughly proven above.
+**And a game confirms it end to end. ✅ Sekiro: Shadows Die Twice plays** (appid 814380,
+installed 2026-08-25, 15 GB) — **graphics, sound and controller all working on the first
+launch, with no iteration at all.** `profiles/sekiro.env`. That is the payoff for this
+item: the pad is not merely enumerated, it drives an action game.
+
+Why it went in one shot is worth noting, because it is evidence the accumulated rules
+are right rather than luck: single `sekiro.exe` with no launcher (so the Chimera Squad
+launcher trap could not apply), D3D11 so DXMT is mandatory, and the per-app registry key
+registered with `--app-only` against a live prefix. All three were decided from
+`RUNTIME.md` §§9–10 before launching, not after a failure.
+
+Checked before launching rather than after: no anti-cheat (`EasyAntiCheat`, `BattlEye`,
+`Denuvo`, `VMProtect`, `Arxan` all zero hits by name, no anti-cheat files on disk), and
+`d3dx11_43`/`d3dcompiler_43` already builtin so no winetricks. ⚠️ A first pass grepped
+case-insensitively for `EAC` and returned 342 hits — it was matching *each*, *reach*,
+*breach*. A test that cannot come back clean is not a test.
+
+⚠️ **No `steam_appid.txt` ships with this game**, so a `*-direct.env` debug profile will
+not work as-is; `sekiro.exe` re-launches itself via `steam://run/814380` and exits 53.
+
+**Still open:** Elden Ring (1245620, owned, D3D11) — but note it *does* use EAC, unlike
+Sekiro, so it is a different class of problem and not a free follow-up.
 
 Two things noticed while in `winebus` that are worth knowing before debugging further:
 - CrossOver's tree carries a fourth bus backend we do not get from upstream,
