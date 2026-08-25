@@ -201,12 +201,78 @@ still unmeasured on the current build**. Loading got smoother when the x87 float
 fixed, so the fade may have gone with it. Re-measure before theorising — that is the last
 known symptom from the WineCX rebase.
 
-**2. Controller support / the SDL2 `winebus` crash** (`RUNTIME.md` §1). Gamepads do not
-work: `winebus` dlopens our bundled `libSDL2` from a worker thread, SDL2's dyld
-initializer touches `NSWindow`, macOS 26 turns that into a hard exception, and the service
-dies with `1053`. Well-scoped, and there is a **reference oracle** — check whether
-gamepads work in the CrossOver bottle. If they do, their build avoids it and the
-difference is findable. Unlocks a class of games (Sekiro and similar).
+**2. ✅ DONE (2026-08-25) — controller support. A pad is seen, and works on XInput,
+DirectInput and rumble. No game has been played with it yet.**
+
+The crash was never what this file said it was. We were not bundling SDL2 at all:
+Homebrew aliases `sdl2` to **`sdl2-compat`**, an SDL2-API shim over SDL3, and the shim
+finds SDL3 only through an `LC_RPATH` relative to its own Cellar directory. Bundling
+copies the file out of the Cellar, the rpath breaks, and the shim reports the missing
+dependency by opening an **`NSAlert`** — which builds an `NSWindow` on whatever thread
+called `dlopen`. `winebus` calls from a worker thread, so the service died with `1053`.
+Not SDL2's Cocoa init, not new in macOS 26, not a Wine or CrossOver bug — all three of
+which this file previously asserted. Full write-up and the generalisation in
+`RUNTIME.md` §1.
+
+Fixed in `bin/bundle-libs`, which now *resolves* SDL2 rather than naming it, preferring a
+real SDL2 and falling back to shim + bundled `libSDL3`. Both branches exercised.
+`bin/provision-host` reports which one the host will get. `tools/probes/sdlopen.c`
+reproduces the whole thing in under a second with no Wine, no prefix and no game.
+
+**Measured after the fix** (`winecx-26.3.0-sse-x86_64`, `WINEDEBUG=+hid wine wineboot -u`):
+`sdl_bus_init` *and* `iohid_bus_init` both trace, no warning, no `1053`, no NSException.
+No rebuild was needed — `SONAME_LIBSDL2` is an absolute path into the bundle, so swapping
+the file is enough.
+
+**A real pad works, on both input APIs. Measured 2026-08-25** with a Google Stadia
+controller (VID_18D1 PID_9400) over USB-C, `prefixes/control`:
+
+| | |
+|---|---|
+| winebus | `sdl_add_device … is_gamepad 1` — **the SDL backend claims it**, i.e. the one that was dead |
+| IOHID | `ignoring hidraw device 18d1:9400` — defers to SDL; correct arbitration, not a failure |
+| name | `get_device_text Returning L"Google Stadia Controller"` — from SDL's controller DB |
+| nodes | `winexinput.sys` splits it into `&XI_00` and `&IG_00` |
+| XInput | slot 0 **CONNECTED**; sticks span −32768…32767, both triggers 0…255, buttons live |
+| DInput | enumerates as `DI8DEVTYPE_GAMEPAD`, acquires; 941 state changes in 20 s, X/Y 0…65535, POV hat reports 0/9000/27000 |
+| rumble | works (Gil, via `joy.cpl`) — so SDL's haptic path is live, not just state reads |
+
+Probes for repeating this: `tools/probes/xinputprobe.c` and `dinputprobe.c`. **Run both.**
+
+**A clean checkout needs no controller-specific step.** `bin/provision-host` →
+`bin/build-runtime` → `bin/mkprefix` is enough; the pad works from first launch, and
+no registry key is required (`winebus`'s `Enable SDL` defaults to 1). But note *which*
+SDL stack a clean machine gets: brew core no longer has a real SDL2, so
+`brew install sdl2` yields the shim, and a fresh machine bundles **sdl2-compat +
+libSDL3** while this machine bundles the unlinked real SDL2 left in its Cellar. Both
+were run against the actual pad and enumerate it identically — that equivalence is
+measured, and it is the only reason the divergence is acceptable. `RUNTIME.md` §1.
+
+⚠️ **`joy.cpl`'s DInput list being empty is not a bug, and cost time here.**
+`joy.cpl/main.c:236` files any device whose path contains `&ig_` under the *XInput*
+list and everything else under the *DInput* list — so an XInput-capable pad appears
+only in the XInput list, and the DInput test tab has nothing selected. DirectInput
+itself enumerates and reads the pad perfectly; `dinputprobe` is what settles it. The
+`Override` button on that tab is the `override` flag in `dinput/joystick_hid.c:1613`,
+which swaps the `&IG_` node for the `&XI_` one.
+
+Also worth knowing before trusting a probe: an axis you did not print is not an axis
+that read zero. The first `dinputprobe` printed only X/Y/Z/Rz and made the right stick
+look dead; SDL puts it on Rx/Ry. Fixed, and the fixed probe shows Rx/Ry centred at
+32767 with Rz genuinely unused.
+
+**Next: a game.** **Sekiro is not installed** (appid 814380; it *is* in the prefix's
+`localconfig.vdf`, so ownership is fine) — ~15 GB, D3D11, so DXMT territory. Elden Ring
+(1245620) is also owned and also D3D11. Sekiro is XInput-only for controllers, and
+XInput is the half that is most thoroughly proven above.
+
+Two things noticed while in `winebus` that are worth knowing before debugging further:
+- CrossOver's tree carries a fourth bus backend we do not get from upstream,
+  `bus_xbox360.c` — and it **disables itself on macOS Sequoia or later**
+  (`xbox_bus_init disabled: running on macOS Sequoia or later`). So on this machine the
+  live backends are SDL and IOHID only.
+- `winebth` (bluetooth) fails to start with `1359` on every boot. Unrelated to gamepads
+  for a USB pad; possibly relevant for a Bluetooth-paired one. Unmeasured.
 
 **3. ✅ DONE (2026-08-14) — the D3D11 class, via Iron Nest.** It was the highest
 information per hour on the list, as expected, but not in the expected way: the
@@ -879,8 +945,9 @@ reaches its menu, menus respond in **real time**, and a turn plays.
    noted above; re-measure before theorising.
 4. **The other two games** — Quasimorph, Battleship Command, both 64-bit Unity/D3D11,
    so DXMT territory and untouched by any of the 32-bit work.
-5. **The SDL2/`winebus` crash** from `RUNTIME.md` §1 — decide whether to drop SDL2
-   from the bundle or fix the dlopen. Gamepads do not work either way today.
+5. ~~**The SDL2/`winebus` crash**~~ — ✅ fixed 2026-08-25, and the diagnosis recorded
+   here was wrong: what we bundled was `sdl2-compat`, not SDL2. See item 2 above and
+   `RUNTIME.md` §1.
 
 ### What carries over, and what does not
 
@@ -1392,8 +1459,14 @@ right call there.
   plausible-sounding explanation and it is wrong.
 
 - *"The `NSWindow should only be instantiated on the main thread!` exception is a
-  WineCX problem."* **No — it is ours, and the mechanism is measured (2026-07-31).**
-  The call stack names it outright:
+  WineCX problem."* **No — it is ours.** ⚠️ **But the mechanism recorded below in
+  2026-07-31 is wrong, and was corrected on 2026-08-25 — see item 2 and `RUNTIME.md`
+  §1.** The library is `sdl2-compat`, not SDL2; the `NSWindow` comes from an `NSAlert`
+  the shim opens because bundling broke the `LC_RPATH` it uses to find SDL3; and macOS
+  26 changed nothing. Kept here because the reasoning below is a good example of the
+  failure it caused: the call stack was read one frame too shallow, the frame that
+  actually named the cause (`error_dialog`) was never looked at, and "measured" was
+  written next to a conclusion that had not been. The call stack:
 
   ```
   30  winebus.so   sdl_bus_init + 76
@@ -1401,12 +1474,13 @@ right call there.
       libc++abi: terminating due to uncaught exception of type NSException
   ```
 
-  `winebus` (gamepad support) `dlopen`s **our bundled `libSDL2`**, and SDL2's dyld
+  `winebus` (gamepad support) `dlopen`s **our bundled `libSDL2`** ~~and SDL2's dyld
   initializer instantiates an `NSWindow` off the Cocoa main thread, which macOS 26
-  turns into a hard exception. That kills the `winebus` service — hence
+  turns into a hard exception~~ — the struck-out half is the wrong part. It kills the
+  `winebus` service — hence
   `scmdatabase_autostart_services Auto-start service L"winebus" failed to start: 1053`
-  in the same log — so **gamepads do not work**, which is exactly what bundling SDL2
-  was for. See `RUNTIME.md` §1.
+  in the same log — so **gamepads did not work**, which is exactly what bundling SDL2
+  was for. See `RUNTIME.md` §1 for what is actually happening.
 
   It is pre-existing rather than a rebase regression: `wine-11.14-x86_64`, the runtime
   that runs Steam and plays Strategic Command, does the identical thing. Not a

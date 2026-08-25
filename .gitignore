@@ -28,6 +28,7 @@
 
 # probe binaries (rebuild with tools/probes/build.sh)
 tools/probes/*.exe
+tools/probes/sdlopen
 
 # fetched by bin/get-winetricks
 /bin/vendor/

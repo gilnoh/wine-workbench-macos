@@ -17,7 +17,12 @@ BREW_ARM=/opt/homebrew/bin/brew
 ICD=/usr/local/etc/vulkan/icd.d/MoltenVK_icd.json
 
 # x86_64 Homebrew: Wine links these; the runtime is x86_64 under Rosetta.
-PKGS_X86="molten-vk vulkan-loader freetype gnutls bison mingw-w64 sdl2"
+#
+# `sdl2` is an ALIAS for `sdl2-compat`, the SDL2-API shim over SDL3 -- so this
+# installs the shim, and `sdl3` is listed next to it because the shim is useless
+# in our bundle without it. See docs/RUNTIME.md section 1 and the SDL2 check
+# below: it is not enough for a file named libSDL2-2.0.0.dylib to exist.
+PKGS_X86="molten-vk vulkan-loader freetype gnutls bison mingw-w64 sdl2 sdl3"
 # arm64 Homebrew: host-side tools only.
 PKGS_ARM="cabextract"
 
@@ -72,6 +77,30 @@ else
 }
 EOF
     note "portability flag" "stripped (was a Homebrew symlink)"
+fi
+
+# A bundlable SDL2 -- which is NOT the same as "libSDL2-2.0.0.dylib exists".
+# Homebrew's `sdl2` is an alias for sdl2-compat, whose bundled copy crashes
+# winebus off the main thread unless libSDL3 travels with it. bin/bundle-libs
+# handles both cases; this only reports which one this host will get, because
+# the failure it prevents is a silent one (no gamepads, plus a scary-looking
+# NSException in every prefix bring-up log).
+echo "== SDL2 for gamepads =="
+sdl2_real=""
+for c in /usr/local/opt/sdl2/lib/libSDL2-2.0.0.dylib \
+         /usr/local/lib/libSDL2-2.0.0.dylib \
+         /usr/local/Cellar/sdl2/*/lib/libSDL2-2.0.0.dylib; do
+    [ -e "$c" ] || continue
+    n=$(strings -a "$c" 2>/dev/null | grep -c 'sdl2-compat:' || true)   # -c, not -q: SIGPIPE
+    [ "${n:-0}" -gt 0 ] && continue
+    sdl2_real="$c"; break
+done
+if [ -n "$sdl2_real" ]; then
+    note "real SDL2" "${sdl2_real}"
+elif [ -e /usr/local/opt/sdl3/lib/libSDL3.dylib ]; then
+    note "sdl2-compat + sdl3" "ok (both bundled together)"
+else
+    note "SDL2" "only sdl2-compat, and no sdl3 to pair it with"; fail=1
 fi
 
 # Cheap end-to-end confirmation that the loader can actually see a device.

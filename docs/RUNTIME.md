@@ -65,41 +65,102 @@ env -u DYLD_FALLBACK_LIBRARY_PATH <test-program> libfoo.dylib   # reachable bare
 ```
 
 Currently bundled: vulkan, freetype, gnutls, SDL2 (and MoltenVK, pulled in as a
-dependency). Left bare deliberately: `libcups` (ships in `/usr/lib`), `libodbc`
-(not installed). SDL2 was found this way *after* the first bundling pass —
-Wine uses it for gamepads, so without it controllers silently do not work.
+dependency; plus libSDL3 on hosts that have only sdl2-compat — see below). Left
+bare deliberately: `libcups` (ships in `/usr/lib`), `libodbc` (not installed).
+SDL2 was found this way *after* the first bundling pass — Wine uses it for
+gamepads, so without it controllers silently do not work.
 
-### ⚠️ The one place bundling makes things worse: SDL2
+### ⚠️ SDL2 is not a name, it is two different libraries
 
-**Measured 2026-07-31, on both `wine-11.14-x86_64` and `winecx-26.3.0-x86_64`.**
-Bundling SDL2 does not currently buy working gamepads — it buys a crash:
+**Fixed 2026-08-25.** For a month this section said bundling SDL2 bought a crash
+instead of gamepads. That was true, and the diagnosis under it was wrong in every
+part. What we bundled was never SDL2.
+
+Homebrew aliases the `sdl2` formula to **`sdl2-compat`** — an SDL2-API shim that
+implements the API on top of SDL3. So `brew install sdl2` installs the shim,
+`$BREW/lib/libSDL2-2.0.0.dylib` and `$BREW/opt/sdl2/` both point at the shim, and
+`bin/bundle-libs` copied the shim into the runtime. It is 396 KB and links AppKit
+but not IOKit; a real SDL2 is 1.5 MB and links IOKit, GameController and
+ForceFeedback. Those two facts are visible in `otool -L` and were there the whole
+time.
+
+The shim loads SDL3 with a bare `dlopen("libSDL3.dylib")` and finds it **only**
+through its own `LC_RPATH`, `@loader_path/../../../../opt/sdl3/lib`. Copying the
+file out of the Cellar — which is exactly what bundling does — invalidates that
+rpath. The shim then reports the failure the way a desktop app would:
 
 ```
-30  winebus.so   sdl_bus_init + 76
-29  dyld         dlopen_from  ->  runInitializers / forEachInitializer
+14  libSDL2-2.0.0.dylib   error_dialog + 144
+13  AppKit                -[NSAlert init] + 101
+ …
+ 3  AppKit                -[NSWindow _initContent:styleMask:backing:defer:contentView:]
     *** NSInternalInconsistencyException: NSWindow should only be instantiated
         on the main thread!
-    libc++abi: terminating due to uncaught exception of type NSException
 ```
 
-`winebus` dlopens `libSDL2` from a worker thread; SDL2's dyld initializer touches
-`NSWindow`, and macOS 26 makes that a hard exception instead of a warning. The
-`winebus` service therefore dies at startup —
-`Auto-start service L"winebus" failed to start: 1053` — so controllers do not work
-*and* every prefix bring-up logs a crash that looks alarming and is unrelated to
-whatever is being debugged at the time.
+`winebus` dlopens from a worker thread, so the alert kills the service
+(`Auto-start service L"winebus" failed to start: 1053`) and gamepads silently do
+not work. Nothing here is SDL2's Cocoa initialisation, nothing here is new in
+macOS 26, and nothing here is a Wine or CrossOver bug — the earlier write-up
+asserted all three. It is a missing dependency reported through AppKit.
 
-Not yet fixed, and there is a real choice to make:
-- **drop SDL2 from the bundle** — honest, since gamepads do not work either way, and
-  it removes a confusing crash from every log; or
-- **keep it and make the dlopen safe** — the interesting fix, and the one worth
-  sending somewhere: either `winebus` should initialise the SDL backend on the main
-  thread, or SDL2's Cocoa initialisation should not run at `dlopen` time. This wants
-  a look at which of the two is actually at fault before blaming either.
+**Reproduce it in a second, with no Wine, no prefix and no game**, using
+`tools/probes/sdlopen.c` — it does the one thing `winebus` does:
 
-Do not "fix" it by removing SDL2 from `WANT` without recording which option was
-chosen and why — the reason SDL2 is in that list at all is that its absence was
-itself a silent failure.
+```sh
+tools/probes/sdlopen runtimes/<name>/lib/bundled/libSDL2-2.0.0.dylib
+# "worker returned cleanly"  -> fine
+# NSException, stack ending in error_dialog -> the shim, with no SDL3 beside it
+```
+
+`bin/bundle-libs` now resolves SDL2 instead of naming it, and prefers, in order:
+
+1. **a real SDL2** — one self-contained file, and what CrossOver ships
+   (theirs is 2.30-era; `/usr/local/Cellar/sdl2/2.32.10` here);
+2. **the shim with `libSDL3` bundled beside it**.
+
+⚠️ **These are not "preferred" and "emergency" — option 2 is what a clean machine
+gets.** Brew core no longer carries a real SDL2; `brew install sdl2` resolves the
+alias to `sdl2-compat`. The real SDL2 on this machine survives only as an
+*unlinked leftover* in `/usr/local/Cellar/sdl2/2.32.10`, from before the alias
+migration, and a `brew cleanup` could remove it. So this machine and a fresh
+checkout will normally bundle **different SDL stacks**.
+
+That is tolerable only because **both are verified with real hardware**, not just
+verified to load — the same Stadia pad enumerates identically on either
+(`sdl_add_device … is_gamepad 1`, correct name, `&XI_00`/`&IG_00` split, XInput
+slot 0 connected, DInput acquired). Option 2 was tested by hiding the real SDL2
+and re-running the whole bring-up. If that ever stops being true, the fix is to
+standardise on option 2 rather than to rely on a leftover Cellar directory.
+
+Taking option 1 also deletes any `libSDL3` a previous option-2 run left in the
+bundle. `bundle-libs` otherwise only ever copies *into* the destination, and a
+stale file there stops the bundle describing what the script decided — which is
+how a leftover becomes a wrong explanation.
+
+Note the detection helper uses `grep -c`, not `grep -q`: `-q` closes the pipe,
+`strings` takes `SIGPIPE`, and `set -o pipefail` turns that into "not the shim"
+— intermittently, which is worse than always.
+
+After the fix, `WINEDEBUG=+hid wine wineboot -u` traces `sdl_bus_init` **and**
+`iohid_bus_init` with no warning and no `1053`. Measured on
+`winecx-26.3.0-sse-x86_64`, 2026-08-25. Swapping the bundled file is enough —
+`SONAME_LIBSDL2` is an absolute path into the bundle, so no rebuild is needed.
+
+**Confirmed with real hardware, same day.** A Google Stadia controller
+(VID_18D1 PID_9400, USB-C) is claimed by the SDL backend (`sdl_add_device …
+is_gamepad 1`), named from SDL's controller DB, split by `winexinput.sys` into
+`&XI_00`/`&IG_00`, and reads correctly on **XInput** (slot 0, full stick range,
+analogue triggers), on **DirectInput** (`DI8DEVTYPE_GAMEPAD`, POV hat, 941 state
+changes in 20 s) and for **rumble**. `tools/probes/xinputprobe.c` and
+`dinputprobe.c` repeat it. Note that `joy.cpl`'s DInput list is empty for such a
+pad *by design* — see `NEXT.md`.
+
+**The generalisation is the part worth keeping:** a bundled library's identity is
+what it *is*, not what it is *called*, and a soname is not evidence. This bundle
+is assembled by copying files out of Homebrew, so anything that resolves through
+`@loader_path`, `@rpath` or a formula alias can change meaning in transit —
+silently, because the failure is a missing feature rather than an error.
 
 `bin/gamerun` deliberately does **not** set `DYLD_FALLBACK_LIBRARY_PATH`.
 Setting it would mask a bundle regression, and this class of bug is invisible

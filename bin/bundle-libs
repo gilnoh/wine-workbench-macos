@@ -44,12 +44,78 @@ esac
 # with:  env -u DYLD_FALLBACK_LIBRARY_PATH <test> libfoo.dylib
 # If dyld cannot find it bare, it belongs here. (libcups is deliberately absent:
 # macOS ships it in /usr/lib and the dyld cache, so bare resolves fine.)
+# SDL2 needs resolving rather than naming, because "libSDL2-2.0.0.dylib" is not
+# a stable identity. Homebrew aliases the `sdl2` formula to `sdl2-compat`, an
+# SDL2-API shim over SDL3, so $BREW/lib/libSDL2-2.0.0.dylib and $BREW/opt/sdl2/
+# both point at the shim and `brew install sdl2` installs it. That shim is what
+# was bundled here from the start, and it is the whole of the "NSWindow should
+# only be instantiated on the main thread!" crash that killed winebus.
+#
+# Mechanism, measured 2026-08-25 with tools/probes/sdlopen.c (no Wine involved):
+# the shim dlopens libSDL3 by bare name at load time and finds it only through
+# its own LC_RPATH, @loader_path/../../../../opt/sdl3/lib. Copying the file out
+# of the Cellar -- which is exactly what this script does -- invalidates that
+# rpath. The shim then calls error_dialog() -> [NSAlert init] -> NSWindow from
+# whichever thread called dlopen; winebus dlopens from a worker thread, so the
+# NSException kills the service (`winebus failed to start: 1053`) and gamepads
+# silently do not work. Nothing about it is SDL2's Cocoa initialisation, and
+# nothing about it is new in macOS 26.
+#
+# So there are two correct bundles, and this prefers the first:
+#   1. a real SDL2 -- self-contained, one file, what CrossOver ships;
+#   2. the shim plus libSDL3 beside it -- also verified to load off-thread, and
+#      the only option on a machine where brew core no longer has real SDL2.
+# grep -c, not grep -q: -q closes the pipe on the first match, `strings` takes
+# SIGPIPE, and `set -o pipefail` turns that into a non-zero status -- i.e. into
+# "this is not the shim". It is timing-dependent, so it misclassifies
+# intermittently, which is worse than always being wrong.
+is_sdl2_compat() {
+    local n
+    n=$(strings -a "$1" 2>/dev/null | grep -c 'sdl2-compat:' || true)
+    [ "${n:-0}" -gt 0 ]
+}
+
+SDL2_LIB=""
+SDL3_LIB=""
+for c in "$BREW/opt/sdl2/lib/libSDL2-2.0.0.dylib" \
+         "$BREW/lib/libSDL2-2.0.0.dylib" \
+         "$BREW"/Cellar/sdl2/*/lib/libSDL2-2.0.0.dylib; do
+    [ -e "$c" ] || continue
+    is_sdl2_compat "$c" && continue
+    SDL2_LIB="$c"; break
+done
+if [ -n "$SDL2_LIB" ]; then
+    info "  SDL2: $SDL2_LIB (real SDL2)"
+    # Drop an SDL3 left by a previous fallback run. This script only ever copies
+    # into $DEST, so without this the bundle keeps a libSDL3 that the real SDL2
+    # does not use -- harmless, but it makes the bundle stop describing what the
+    # script decided, which is how a stale file becomes a wrong explanation.
+    rm -f "$DEST"/libSDL3*.dylib
+else
+    for c in "$BREW/opt/sdl2-compat/lib/libSDL2-2.0.0.dylib" \
+             "$BREW/lib/libSDL2-2.0.0.dylib"; do
+        [ -e "$c" ] || continue
+        SDL2_LIB="$c"; break
+    done
+    [ -n "$SDL2_LIB" ] || die "no SDL2 of any kind under $BREW -- run bin/provision-host"
+    SDL3_LIB="$BREW/opt/sdl3/lib/libSDL3.dylib"
+    [ -e "$SDL3_LIB" ] || SDL3_LIB="$BREW/lib/libSDL3.dylib"
+    [ -e "$SDL3_LIB" ] || die "only sdl2-compat is installed under $BREW, and it is
+     useless without SDL3 beside it in the bundle. Install it:
+       arch -x86_64 $BREW/bin/brew install sdl3
+     Verify afterwards with:
+       tools/probes/sdlopen <runtime>/lib/bundled/libSDL2-2.0.0.dylib"
+    info "  SDL2: $SDL2_LIB (sdl2-compat shim)"
+    info "  SDL3: $SDL3_LIB (bundled beside it -- the shim dlopens it by name)"
+fi
+
 WANT=(
     "$BREW/opt/molten-vk/lib/libMoltenVK.dylib"
     "$BREW/lib/libvulkan.1.dylib"
     "$BREW/opt/freetype/lib/libfreetype.6.dylib"
     "$BREW/opt/gnutls/lib/libgnutls.30.dylib"
-    "$BREW/lib/libSDL2-2.0.0.dylib"        # gamepads; silently no controllers without it
+    "$SDL2_LIB"                            # gamepads; silently no controllers without it
+    ${SDL3_LIB:+"$SDL3_LIB"}
 )
 
 mkdir -p "$DEST"
