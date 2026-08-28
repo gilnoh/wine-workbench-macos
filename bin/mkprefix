@@ -4,6 +4,7 @@
 #
 #   bin/mkprefix <prefix-name> [runtime-name]
 #   bin/mkprefix <prefix-name> --no-provision      skip the winetricks step
+#   bin/mkprefix <prefix-name> --cjk               also install CJK fonts
 #
 # The prefix itself stays small. Game data lives in library/steamapps, mounted
 # as drive S: so every prefix sees the same installed games without duplicating
@@ -21,13 +22,15 @@ source "$(dirname "$0")/common.sh"
 NAME=""
 RUNTIME="$DEFAULT_RUNTIME"
 PROVISION=1
+CJK=0
 for arg in "$@"; do
     case "$arg" in
         --no-provision) PROVISION=0 ;;
+        --cjk) CJK=1 ;;
         *) if [ -z "$NAME" ]; then NAME="$arg"; else RUNTIME="$arg"; fi ;;
     esac
 done
-[ -n "$NAME" ] || die "usage: mkprefix <prefix-name> [runtime-name] [--no-provision]"
+[ -n "$NAME" ] || die "usage: mkprefix <prefix-name> [runtime-name] [--no-provision] [--cjk]"
 
 PREFIX_PATH="$PREFIXES_DIR/$NAME"
 [ -e "$PREFIX_PATH" ] && die "prefix '$NAME' already exists at $PREFIX_PATH"
@@ -74,7 +77,7 @@ mkdir -p "$LIBRARY_DIR" || die "cannot create $LIBRARY_DIR"
 ln -sfn "$LIBRARY_DIR" "$PREFIX_PATH/dosdevices/s:"
 
 # --- provisioning ---------------------------------------------------------
-# Every prefix gets these two. Both were learned the hard way:
+# Every prefix gets these three. All were learned the hard way:
 #
 #   corefonts       Wine ships only 6 fonts (tahoma, symbol, wingdings,
 #                   marlett, webdings). Anything expecting Arial/Times renders
@@ -83,6 +86,25 @@ ln -sfn "$LIBRARY_DIR" "$PREFIX_PATH/dosdevices/s:"
 #                   D3D11 games need the genuine Microsoft compiler. winetricks
 #                   also writes the native override into the prefix registry,
 #                   so nothing has to force it at launch.
+#   vcrun2022       The MSVC 2015-2022 runtime (msvcp140, vcruntime140, concrt140
+#                   and friends). Added 2026-08-28 after finding that
+#                   prefixes/steam-winecx had it installed BY HAND -- twice,
+#                   recorded only in the prefix's own winetricks.log -- while
+#                   mkprefix installed nothing of the sort. A prefix built from
+#                   these instructions was therefore not the prefix that had been
+#                   tested, and the difference was invisible.
+#
+#                   It is not guesswork that this belongs here: a CrossOver bottle
+#                   holding a working Steam carries the same thing, as four MSIs in
+#                   drive_c/windows/Installer -- "Microsoft Visual C++ 2022
+#                   X86/X64 Minimum/Additional Runtime 14.51.36247". Same
+#                   component, same version family.
+#
+# --cjk adds Chinese/Japanese/Korean fonts. NOT the default: it is ~380 MB and
+# several minutes per prefix, and this prefix is supposed to stay small. Measured
+# reason to leave it out -- prefixes/steam-winecx has no CJK font at all and runs
+# Steam fine; a CrossOver bottle installs them into every bottle regardless, which
+# is a different trade-off, not a requirement. Pass --cjk if you need the glyphs.
 #
 # Wine Mono is installed too when the runtime has it (see below). Plenty of
 # games ship a small .NET launcher -- Strategic Command's Launcher.exe imports
@@ -94,18 +116,49 @@ if [ "$PROVISION" = 1 ]; then
         info "fetching pinned winetricks"
         "$(dirname "$0")/get-winetricks" || die "could not fetch winetricks"
     fi
-    info "provisioning: corefonts d3dcompiler_47"
+    # Written as an if, not `[ "$CJK" = 1 ] && VERBS=...`. That form happens to
+    # survive `set -e` here (bash exempts every command in an && list but the
+    # last), but it survives by accident, and this script has already been killed
+    # once by a bare command that returned 1 -- see the mono glob note below.
+    VERBS="corefonts d3dcompiler_47 vcrun2022"
+    if [ "$CJK" = 1 ]; then VERBS="$VERBS cjkfonts"; fi
+    info "provisioning: $VERBS"
     env WINEPREFIX="$PREFIX_PATH" \
         WINE="$BIN/wine" WINESERVER="$BIN/wineserver" \
         DYLD_FALLBACK_LIBRARY_PATH="$DYLD" \
         PATH="$BIN:/opt/homebrew/bin:$PATH" \
         WINEDEBUG=-all \
-        "$WINETRICKS" -q corefonts d3dcompiler_47 >/dev/null 2>&1 \
+        "$WINETRICKS" -q $VERBS >/dev/null 2>&1 \
         || die "winetricks provisioning failed (is cabextract installed? see bin/provision-host)"
     # Count with find, not `ls | wc -l`: see the note on the mono glob below --
     # under `set -eo pipefail` an `ls` of a missing directory kills the script.
     n=$(find "$PREFIX_PATH/drive_c/windows/Fonts" -type f 2>/dev/null | wc -l | tr -d ' ')
     info "  fonts installed: $n"
+
+    # Assert vcrun2022 actually landed. winetricks -q swallows a lot, and a verb
+    # that silently no-ops is exactly how this gap went unnoticed: the prefix
+    # looks provisioned and is not.
+    #
+    # Do NOT assert on the presence of system32/vcruntime140.dll. That was the
+    # first version of this check and it is a control that cannot fail: Wine
+    # ships its OWN builtin vcruntime140.dll, so the file is there in a prefix
+    # that never saw vcrun2022 (measured on prefixes/control, 2026-08-28).
+    # What the verb actually changes is the DllOverride that makes the native
+    # copy load at all -- so assert on that.
+    #
+    # Wait for the wineserver FIRST. Wine keeps the registry in memory and writes
+    # user.reg when the server exits, so grepping the file straight after
+    # winetricks is a race: it passed on one prefix and failed on the next, with
+    # the override present in the file seconds later either way. Measured
+    # 2026-08-28 -- the failing run died here and left the prefix without mono.
+    env WINEPREFIX="$PREFIX_PATH" PATH="$BIN:$PATH" "$BIN/wineserver" -w
+    if grep -q '"\*vcruntime140"' "$PREFIX_PATH/user.reg" 2>/dev/null; then
+        info "  vcrun2022 installed (native override registered)"
+    else
+        die "vcrun2022 did not take -- no '*vcruntime140' DllOverride in user.reg.
+  The builtin DLL will be used instead of Microsoft's. Install by hand with:
+    WINEPREFIX=$PREFIX_PATH bin/vendor/winetricks -q vcrun2022"
+    fi
 
     # Wine Mono, if the runtime carries it. A source build does not download the
     # mono/gecko MSIs, so bin/get-addons fetches them into share/wine/.

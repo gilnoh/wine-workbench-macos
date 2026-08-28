@@ -9,6 +9,136 @@
 > **This file is the only one that tracks current state**, so it is where anything
 > time-varying belongs: what is working now, what is open, and what has been refuted.
 
+## Session 2026-08-28 — Steam startup measured, and a provisioning gap closed
+
+### Steam client cold start: ~24 s, and ours is NOT slower than CrossOver
+
+Measured, harness in the session scratchpad, markers taken from Steam's own logs so both
+environments are read the same way. Ours = `winecx-26.3.0-sse-x86_64` / `steam-winecx`;
+reference = a CrossOver 26.0 bottle with the **same Steam client build** (`1785799196`),
+so the client-version confounder is gone.
+
+| | ours | CrossOver bottle |
+| --- | --- | --- |
+| runs | 5 | 4 |
+| exec → main window visible | 23.4 / 24.4 / 24.4 s | 24.4 / 25.4 / 25.4 / 25.4 s |
+| `Timed out waiting for network` | **10.0 s, 5/5** | **10.0 s, 4/4** |
+
+Phase split, effectively identical in both: ~10 s CEF/Chromium bring-up (exec → login
+window), **~10 s dead time in `WaitingForNetwork`**, ~4 s logon + library ready.
+
+The 10 s is not work. `steamui_login.txt` shows the state entered, the timer expiring,
+and logon succeeding one second later — while `connection_log.txt` records the client's
+own connectivity test passing IPv4 *and* IPv6 several seconds **before** the wait starts.
+
+- **It is not msync.** `WINEMSYNC=1` is set and verified active on our side, and the
+  CrossOver bottle prints `msync: bootstrapped mach port` on its own launch. Same setting
+  both sides. There is no esync to enable — macOS has no eventfd and CodeWeavers' tree
+  carries `msync.c` only.
+- **Cold game launch is Steam plus the game.** Every profile is `steam.exe -applaunch
+  <id>`, and Steam does not look at the argument until the client is fully up
+  (`ExecCommandLine` lands at +26 s, two seconds after the main window). Measured on
+  `strategic-command`: `Launcher.exe` at **+29 s cold vs +1 s warm**, the game binary at
+  **+39 s cold vs +7 s warm**. Steam's cold start costs ~31 s on any game launch.
+
+### OPEN: what is `WaitingForNetwork` actually waiting for?
+
+Candidate, **not established** — recorded so it is not re-derived from scratch:
+
+- Measured: Wine's `wlanapi.WlanEnumInterfaces` is a semi-stub returning
+  `dwNumberOfItems = 0` (`dlls/wlanapi/main.c`), and Steam does call it during startup
+  (`WlanOpenHandle` → `WlanEnumInterfaces` → `WlanCloseHandle`, once).
+- Measured: `netprofm.dll` and `sensapi.dll` are **not loaded at all**, which rules out
+  the obvious Network List Manager explanation before anyone spends a day on it.
+- Against the candidate: the wlanapi call lands ~6 s *before* the wait begins and nothing
+  polls during the 10 s. Correlation and a plausible mechanism, no causal chain.
+
+The decisive test is a patched `wlanapi` reporting one connected interface. If the 10 s
+disappears, it is worth taking to CodeWeavers — their own shipping build has the same
+stall, so this is not a defect of our build.
+
+Two controls failed on the way here and their results were discarded, not reported: a
+`+loaddll` run with `WINEDEBUG=-all` hard-coded in the harness, and a `+wlanapi` run
+against the bottle where `cxstart` did not propagate `WINEDEBUG` (2 lines captured).
+
+### FIXED: mkprefix did not install the VC++ runtime
+
+`prefixes/steam-winecx` had `vcrun2022` installed **by hand, twice**, recorded only in
+that prefix's own `winetricks.log`. `bin/mkprefix` installed `corefonts` and
+`d3dcompiler_47` and nothing else, so a prefix built from the documented instructions was
+not the prefix everything here was tested on — and the difference was invisible.
+A prefix made by the old `mkprefix` (`prefixes/control`, measured 2026-08-28 and since
+deleted) demonstrated it: no `*vcruntime140` DllOverride at all.
+
+The reference agrees this belongs in a Steam prefix: the CrossOver bottle carries four
+MSIs in `drive_c/windows/Installer` — *Microsoft Visual C++ 2022 X86/X64 Minimum and
+Additional Runtime, 14.51.36247*.
+
+`mkprefix` now provisions `corefonts d3dcompiler_47 vcrun2022` and asserts the result.
+**Note the assertion is on the DllOverride, not on the file**: the first version checked
+for `system32/vcruntime140.dll` and was a control that cannot fail, because Wine ships
+its own builtin of that name, and the old `prefixes/control` had that file without ever
+seeing the verb.
+
+Not claimed: that Steam *fails* without it. That is unmeasured. What is now true is that
+a fresh prefix matches both the reference bottle and the prefix that was actually tested.
+
+**Verified end to end (2026-08-28).** `prefixes/steam-clean` was built from nothing by the
+current `mkprefix`, had Steam installed into it (`SteamSetup.exe /S`) and was logged in by
+hand. Nothing was installed by hand beyond that. Result: **6 of 7 cold launches at exactly
+24.4 s**, phase for phase identical to `steam-winecx`, same 10 s `WaitingForNetwork`
+timeout. A virgin prefix is now the prefix that was tested.
+
+The check itself had a bug worth keeping, because it is the same trap this file already
+warns about twice. The assertion greps `user.reg`, but Wine holds the registry in memory
+and writes that file when the **wineserver exits** — so grepping straight after winetricks
+is a race. It passed on one prefix and failed on the next with the override present in the
+file seconds later either way; the failing run died into stderr and left the prefix with no
+Wine Mono. `mkprefix` now runs `wineserver -w` before asserting.
+
+**Observation, not a conclusion:** 1 of those 7 launches never brought up the UI —
+`src\steamUI\steamuisharedjscontroller.cpp (549) : Failed creating offscreen shared JS
+context`, webhelper started and no window followed. That string appears **nowhere** in
+`steam-winecx`'s logs (5 runs that day plus a month of history) or the CrossOver bottle's.
+One occurrence, on a prefix minutes old, inside a tight teardown/relaunch loop. Not
+established whether it is the fresh prefix, the harness's fast `wineserver -k` between
+runs, or plain intermittency. Its `cef_log.txt` also carries
+`network_change_notifier_win.cc: WSALookupServiceBegin failed with: 8`, which may or may
+not connect to the `WaitingForNetwork` item above — do not assume it does.
+
+Fonts were checked at the same time and are **not** a build bug. The Vera family and
+`ume-ui-gothic.ttf` that CrossOver ships are not in CodeWeavers' published source tree at
+all (`src/crossover/sources/wine/fonts/` is 28 files), so our build is not dropping them.
+CrossOver additionally installs ~380 MB of CJK fonts into every bottle; `mkprefix --cjk`
+does the same on request. Left off by default deliberately — `steam-winecx` has no CJK
+font and runs Steam fine.
+
+### OPEN (low priority): `--winecx <ver>` is not validated against the source tree
+
+`bin/build-runtime --winecx 99.9.9` builds happily. The version selects the output name
+and the tarball path, but the source tree comes from a fixed default that exists whatever
+you typed, so the runtime gets built and stamped `crossover_version: 99.9.9` in
+PROVENANCE — a provenance record that is simply false. Found 2026-08-28 while testing
+something else; it cost a 15 MB partial runtime and nothing worse. Guard it by comparing
+`--winecx` against the tree's own tag before building.
+
+### Repository is standalone; CrossOver is a dev-machine convenience only (2026-08-28)
+
+`bin/build-runtime` used to read `/Applications/CrossOver.app/Contents/Info.plist` and
+**stop the build** when the installed version disagreed with `--winecx`. That made an
+optional investigative aid look like a build dependency. Removed, along with the
+`--allow-cx-mismatch` flag it needed and the `crossover_app_at_build` PROVENANCE field,
+which leaked the dev machine's state into a shipped runtime. The version-match warning
+now lives in `bin/compare-bottle`, which is the only thing that actually uses a bottle,
+and warns rather than stops.
+
+`AGENT_START_HERE.md`, `RUNTIME.md`, `CLAUDE.md` and `bin/backend-install` were reworded
+the same way. Provenance statements stay — the base *is* CodeWeavers' published source,
+and that is worth saying. What is gone is anything implying an installed CrossOver is
+needed to build, run or configure this repository. Keep it that way: A/B-ing against a
+bottle is a property of this development machine, and belongs in this file, not in the
+operating guide or the scripts.
+
 ## Current state (2026-08-15)
 
 - **Three games play.** Strategic Command WWII (32-bit, wined3d), **IRON NEST:

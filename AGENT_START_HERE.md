@@ -69,7 +69,13 @@ else.
 
 ```sh
 bin/mkprefix <name>                      # wineboot + provisioning + mounts S:
+bin/mkprefix <name> --cjk                # ... plus CJK fonts (~380 MB, slow)
 ```
+
+Provisioning installs `corefonts`, `d3dcompiler_47` and `vcrun2022`, then Wine Mono if
+the runtime carries it. Each is there for a reason recorded in the script; `vcrun2022` in
+particular is asserted afterwards, because Wine ships its own builtin `vcruntime140.dll`
+and a prefix that never got the native one looks identical until something loads it.
 
 Then install the game by hand. Steam specifically:
 
