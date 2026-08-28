@@ -62,7 +62,8 @@ if [ "$APP_ONLY" = 0 ] && { pgrep -f "$PREFIXES_DIR/$PREFIX/" >/dev/null 2>&1 \
    || pgrep -f "$RUNTIMES_DIR/$RUNTIME/" >/dev/null 2>&1; }; then
     die "processes are live on prefix '$PREFIX' or runtime '$RUNTIME'.
   Installing now would swap DLLs underneath them. Stop them first:
-    bin/killwine        (NB: also kills a running CrossOver bottle)"
+    bin/killwine        (NB: matches by argv, so it also kills Wine processes
+                         belonging to other Wine installations on this machine)"
 fi
 
 # install_file <src> <destdir> -- atomically, via a temp name in the same

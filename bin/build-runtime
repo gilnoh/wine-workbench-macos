@@ -11,7 +11,6 @@
 #                         FAILED build, which leaves the directory behind)
 #   --src DIR             use this source tree instead of the mode's default
 #   --name NAME           output runtimes/NAME instead of the derived name
-#   --allow-cx-mismatch   build even when CrossOver.app disagrees with --winecx
 #   --pe-gcc              use mingw-gcc for the PE build (with SSE math forced)
 #                         instead of clang -- see "the PE compiler" below
 #
@@ -49,7 +48,6 @@ NAME_OVERRIDE=""
 JOBS=8
 WITH_DEBUG=0
 FORCE=0
-ALLOW_CX_MISMATCH=0
 PE_GCC=0
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -60,7 +58,6 @@ while [ $# -gt 0 ]; do
         --jobs)    JOBS="$2"; shift 2 ;;
         --with-debug) WITH_DEBUG=1; shift ;;     # also apply class 'debug' patches
         --force)   FORCE=1; shift ;;
-        --allow-cx-mismatch) ALLOW_CX_MISMATCH=1; shift ;;
         --pe-gcc)  PE_GCC=1; shift ;;            # mingw-gcc + forced SSE math
         *) die "unknown option: $1" ;;
     esac
@@ -81,39 +78,8 @@ if [ "$MODE" = winecx ]; then
     curl -O https://media.codeweavers.com/pub/crossover/source/crossover-sources-$CXVER.tar.gz
     tar xzf crossover-sources-$CXVER.tar.gz      # -> sources/wine"
 
-    # The hard rule (docs/NEXT.md): the source version must equal the installed
-    # CrossOver version, because every real finding in this project came from
-    # A/B-ing against a working CrossOver bottle. A mismatch makes that reference
-    # lie, so it stops the build rather than being noted in passing.
-    plist=/Applications/CrossOver.app/Contents/Info.plist
-    CX_INSTALLED=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist" 2>/dev/null)
-    CX_INSTALLED="${CX_INSTALLED:-none}"
-    case "$CX_INSTALLED" in
-        "$CXVER"*) : ;;                          # 26.3.0.39794 matches 26.3.0
-        none)
-            # No CrossOver at all: perfectly buildable -- CodeWeavers publish these
-            # sources under the LGPL and they need nothing from the app. You only
-            # lose the A/B reference, so say so plainly and carry on. (A *mismatch*
-            # is different: it makes every comparison silently lie, so it still stops
-            # the build.)
-            info "WARNING: CrossOver.app is not installed."
-            info "         The runtime will build and run, but the A/B reference that"
-            info "         produced most findings in this project is unavailable."
-            info "         See docs/NEXT.md for what that method is worth." ;;
-        *) if [ "$ALLOW_CX_MISMATCH" = 1 ]; then
-               info "WARNING: installed CrossOver is $CX_INSTALLED, source is $CXVER"
-               info "         the bottle reference will not match this runtime"
-           else
-               die "installed CrossOver ($CX_INSTALLED) does not match --winecx $CXVER
-  A version-matched CrossOver is the reference every comparison here is measured
-  against; when the two disagree it lies silently. Upgrade one of them, or pass
-  --allow-cx-mismatch to build anyway (it is recorded in PROVENANCE).
-  Note: having NO CrossOver installed is fine and only warns."
-           fi ;;
-    esac
 else
     NAME="wine-$VERSION-x86_64"
-    CX_INSTALLED=""
     # Prefer a version-named tree; fall back to src/wine when it is checked out at
     # the requested version, which is how this repo has been laid out so far.
     SRC="$GAMES_ROOT/src/wine-$VERSION"
@@ -401,7 +367,6 @@ fi
     if [ "$MODE" = winecx ]; then
         echo "source_tarball:    $(basename "${TARBALL:-unknown}")"
         echo "sha256:            ${sha:-unavailable (tarball not on disk)}"
-        echo "crossover_app_at_build: ${CX_INSTALLED:-none}"
     fi
     # macOS switches framework behaviour on the binary's deployment target
     # ("linked on or after"), so two builds of identical source can behave

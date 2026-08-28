@@ -1,11 +1,16 @@
 #!/bin/bash
-# Diff a working CrossOver bottle against one of our prefixes.
+# DEVELOPMENT AID -- not part of setting this project up or running it.
+#
+# Nothing in this repository needs CrossOver.app: the runtime is built from
+# CodeWeavers' published sources and runs standalone. This script exists only
+# because a *separately installed* CrossOver is a convenient second opinion
+# while investigating, and comparing two environments beats hypothesising about
+# one. If you do not have it installed, you are not missing a dependency.
 #
 #   bin/compare-bottle <crossover-bottle-name> [our-prefix]
 #
-# Used to answer "what does a bottle that actually works have that ours does
+# Answers "what does an environment that actually works have that ours does
 # not" -- DLL overrides, native DLLs dropped into system32, installed runtimes.
-# Reference beats hypothesis.
 
 source "$(dirname "$0")/common.sh"
 
@@ -15,8 +20,21 @@ PREFIX="${2:-steam-base}"
 CXB="$HOME/Library/Application Support/CrossOver/Bottles/$BOTTLE"
 PFX="$PREFIXES_DIR/$PREFIX"
 
-[ -d "$CXB" ] || die "no CrossOver bottle '$BOTTLE' at $CXB"
+[ -d "$CXB" ] || die "no CrossOver bottle '$BOTTLE' at $CXB
+  This script is a development aid and needs a CrossOver you installed yourself.
+  Nothing else in this repository requires one."
 [ -d "$PFX" ] || die "no prefix '$PREFIX'"
+
+# The comparison is only worth as much as the version match: a bottle built by a
+# different CrossOver than the sources a runtime came from will differ for
+# reasons that have nothing to do with what you are chasing. Warn -- do not stop;
+# this is the dev's own reference, and the dev decides what it is worth.
+cx_app=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' \
+    /Applications/CrossOver.app/Contents/Info.plist 2>/dev/null)
+[ -n "$cx_app" ] && echo "NOTE: comparing against CrossOver $cx_app -- check this
+      matches the crossover_version in the runtime's PROVENANCE, or the diff
+      will show version drift as if it were a finding."
+echo
 
 echo "############ 1. DLL OVERRIDES ############"
 echo "--- CrossOver bottle ---"

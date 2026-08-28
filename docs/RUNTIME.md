@@ -300,7 +300,6 @@ runtime when:
 | i386 PE float math is x87, not SSE | ~60x slower float code under Rosetta (below) |
 | the source tree is not a git repo at its own root | `git apply` skips every hunk and exits 0 — an unpatched runtime that looks patched |
 | the tree differs from its tag by anything outside `patches/series` | changes that vanish on a clean rebuild |
-| `--winecx <ver>` disagrees with the installed CrossOver | an A/B reference that quietly lies |
 | `PROVENANCE` is missing a field | an unlabelled runtime |
 
 The recipe below is kept because it documents *why* each flag is there, and these

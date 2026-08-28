@@ -60,9 +60,10 @@ The `git init` is **required**, not tidiness: `build-runtime` refuses to build a
 tree that is not its own git repository, because `git apply` run inside another repo
 silently skips every hunk and still exits 0.
 
-CrossOver.app itself is optional — its *sources* are all the build needs. If it is
-installed, its version must match the source version, or the build stops; that reference
-is the project's main investigative tool and a mismatched one lies silently.
+Only CodeWeavers' published sources are needed. Nothing in this repository builds,
+runs, configures itself against, or checks for an installed copy of CrossOver.app — the
+runtime is self-contained, and `--winecx <ver>` names the *source* version and nothing
+else.
 
 ### Make a prefix and install a game
 
@@ -102,10 +103,11 @@ every A/B comparison in `docs/` was run.
 
 - **Never run two prefixes' Steam clients at once** — they share `S:\steamapps` and will
   fight over install state.
-- **`bin/killwine` also kills a running CrossOver bottle** (same argv patterns). Never
-  run it while comparing against CrossOver.
+- **`bin/killwine` selects by argv pattern, not by prefix**, so it will also kill Wine
+  processes belonging to *other* Wine installations on the machine. Know what else is
+  running before you use it.
 - **A launched game often shows a black window with an hourglass for ~30 s.** That is
-  normal — CrossOver does the same. It carries no diagnostic information.
+  normal and carries no diagnostic information.
 - **Wine rewrites a PE process's argv *and* its `comm`** to the Windows image name, and
   orphans reparent to PID 1. A process you are looking for may appear as bare
   `start.exe` with no path. `bin/killwine --deep` sweeps by open files instead.
@@ -155,9 +157,10 @@ cannot carry that, and guessing it went wrong here once already.
 
 The method that has produced every real finding here:
 
-- **Compare against a working reference.** A version-matched CrossOver bottle running the
-  same game is the strongest tool available. `bin/compare-bottle` diffs a bottle against
-  one of our prefixes.
+- **Compare against a working reference.** If you have some *other* environment that
+  runs the same game correctly, diffing it against ours is the strongest tool available.
+  That reference is a property of your machine, not of this repository — none is
+  required, and none is assumed anywhere in the build or the runtime.
 - **A difference question wants a diff, not a trace.** "Why does the reference behave
   differently?" is answered by diffing the reference. When the *source* is identical,
   diff the **binaries** — `objdump -d` on the PE DLLs has settled at least one question
@@ -209,7 +212,8 @@ The method that has produced every real finding here:
 WINEDEBUG=+seh,+pid,+virtual,+loaddll,+timestamp,+bitblt   # useful channels
 bin/gamerun <profile>                    # profiles default WINEDEBUG through ${WINEDEBUG:-...}
 tools/probes/                            # small Windows binaries, one question each
-bin/compare-bottle <bottle> <prefix>     # DLL overrides, native DLLs, bottle config
+bin/compare-bottle <bottle> <prefix>     # dev aid: diff a separately-installed
+                                         # CrossOver bottle against one of our prefixes
 ps -M <pid>                              # per-thread CPU and priority (parse per row:
                                          #   header row has PRI in field 6, thread rows in 4)
 sample <pid> 5 10                        # thread names; it cannot attribute CPU

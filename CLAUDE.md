@@ -30,8 +30,8 @@ and the "do not re-chase these" list of measured dead ends. `README.md`,
 
 ## Practical
 
-- `bin/killwine` also kills a running CrossOver bottle — never run it while comparing
-  against CrossOver.
+- `bin/killwine` selects by argv pattern, not by prefix, so it also kills Wine processes
+  from other Wine installations on the machine. Know what else is running.
 - Never run two prefixes' Steam clients at once; they share `S:\steamapps`.
 - A black window with an hourglass for ~30 s after launch is normal and carries no
   information. Ask the user what they see rather than guessing from a screenshot.
