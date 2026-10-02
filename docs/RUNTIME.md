@@ -480,11 +480,41 @@ Never run two prefixes' Steam clients at once — they share `S:\steamapps`.
 | `dxgiprobe` | which GPU adapter does Wine report to the application |
 | `glyphprobe` | **can DirectWrite rasterise a glyph at all** |
 | `fontsmooth` | the font-smoothing parameters Skia reads |
+| `mfprobe` | can Media Foundation open a file, and can it **decode** it (two separate failures) |
+| `oggprobe32` | how fast an application's **own** `vorbisfile.dll` decodes a file; run it here and under CrossOver |
+| `imgprobe32/64` | how long GDI+ takes to load and decode an image |
 
 Plus the surface dump (`patches/wine-0005`, class `debug`): set
 `WINE_DUMP_SURFACE=<dir>` and render the raw BGRA with
 `tools/probes/rawtopng.py`. This is what proved the text was never rasterised
 rather than lost in presentation — see `docs/evidence/`.
+
+### Running Wine tools against a live prefix: set `WINEMSYNC=1`
+
+`bin/gamerun` starts every wineserver with `WINEMSYNC=1`. A Wine process
+started *outside* gamerun — `winedbg`, `reg`, `tasklist`, a probe — without
+that variable cannot work with that server, and **it fails silently**: no
+output, exit status 1, nothing on stderr. Measured 2026-10-01 against a running
+Steam prefix: `wine cmd /c echo hello` printed nothing and returned 1 without
+the variable, and printed `hello` and returned 0 with it. Nothing about the
+failure points at msync, so it reads as a broken runtime.
+
+```sh
+export WINEPREFIX=$PWD/prefixes/<pfx> WINEMSYNC=1 WINEDEBUG=-all
+runtimes/<rt>/bin/wine tasklist.exe
+```
+
+Use `bin/gamerun <profile> --shell` instead where you can; it sets this for you.
+
+Two `winedbg` traps found the same day:
+
+- **`info proc` does not list every process.** Its tree view left out Steam,
+  the game's launcher and the game itself while all three were running —
+  `tasklist.exe` listed them. Take the pid from `tasklist` (decimal; winedbg
+  wants hex).
+- **`bt` after `attach` is not the busy thread**, and `bt all` walks *every*
+  process in the prefix. Filter its output on `in process <pid>`, and find the
+  busy thread with `ps -M -p <unix-pid>` first.
 
 **Method note.** Every genuine finding this project has produced came from
 comparing against a working reference or measuring directly. Inferring causes

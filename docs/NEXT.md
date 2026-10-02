@@ -9,6 +9,148 @@
 > **This file is the only one that tracks current state**, so it is where anything
 > time-varying belongs: what is working now, what is open, and what has been refuted.
 
+## Session 2026-10-01/02 — Fantasy General II plays; the runtime gains GStreamer
+
+**Fantasy General II** (Unity 2018.4, D3D11 on DXMT, appid 1025440) plays, with its
+opening video and a clean exit. Getting there turned up four gaps, none of them
+game-specific.
+
+### 1. Rosetta 2 was missing after the macOS 27 update
+
+`bin/wine` failed with `Bad CPU type in executable`; `arch -x86_64 /usr/bin/true`
+failed the same way, and `/Library/Apple/usr/libexec/oah/` held only `RosettaLinux`.
+Fixed by `sudo softwareupdate --install-rosetta`. `bin/provision-host` now checks
+for it first, by running x86_64 code rather than looking for files.
+
+### 2. The runtime had no Media Foundation video at all
+
+Symptom: after Quit, `FG2.exe` kept running and burned one core at 100% forever.
+Reproduced 3/3. Measured, in order:
+
+- **Where it spins.** Unity publishes its symbols, so the stuck stack could be
+  resolved. The main thread is in
+  `PlayerCleanup → CleanupEngine → MediaAPI::Playback::Shutdown →
+  ~VideoPlaybackMgr → ReleaseVideoPlayback`. The disassembly shows the loop:
+  `while (active_list not empty) ReleaseVideoPlayback(front)`, and
+  `ReleaseVideoPlayback` removes an entry only if `VideoClipPlayback::IsMediaInfoReady()`
+  (vtable slot `+0x108`) is true. A video that never got its media info is never
+  removed, so the loop never ends. **This is a Unity bug that only a failed video
+  triggers.**
+- **Why the video failed.** `output_log.txt`: `WindowsVideoMedia error 0xc00d36c4`
+  on `FG2_Teaser_01.mp4` (H.264 Main + AAC). `tools/probes/mfprobe` reproduces it
+  outside the game. The runtime was configured without GStreamer
+  (`config.log`: "GStreamer won't be supported"), and in this tree:
+  - `mfsrcsnk` hands containers to the GStreamer byte stream handler unless
+    `HKCU\Software\Wine\MediaFoundation\DisableGstByteStreamHandler` is set;
+  - `msmpeg2vdec`'s H.264 decoder only forwards to winegstreamer's
+    `CLSID_wg_h264_decoder`, and there is no other route.
+
+  With the registry switch set, the file opened but decoding failed with
+  `c00d5212` (`MF_E_TOPO_CODEC_NOT_FOUND`), and the game failed one step later at
+  "Setting media type for first video stream". **The exit hang stayed.** That
+  ruled out "opening is enough". The switch was removed again afterwards.
+- **The fix**, measured end to end: with GStreamer built in, `mfprobe` decodes 30
+  NV12 frames; the game's log has no video error; the opening video plays; and
+  Steam's `gameprocess_log` shows `Launcher.exe` and `FG2.exe` exiting with code 0.
+
+**How GStreamer got in.** x86_64 Homebrew has no gstreamer bottle for macOS 27, so
+`brew install` would have compiled ~60 formulas from source. Instead
+`bin/build-gstreamer` builds a minimal x86_64 GStreamer 1.28.7 into
+`toolchains/`, with CrossOver's plugin set:
+- H.264 is decoded by `vtdec` (VideoToolbox) and AAC by `atdec` (AudioToolbox).
+- `atdec` moved from `applemedia` to `osxaudio` after 1.24, and CrossOver ships
+  1.24.4. **Without `atdec` the teaser did not open at all**, not just its audio:
+  Wine's parser runs every stream through decodebin, and one undecodable stream
+  fails the whole source.
+
+`bin/bundle-libs` copies it into `lib/bundled/`. `bin/gamerun` sets
+`GST_PLUGIN_SYSTEM_PATH` / `GST_PLUGIN_SCANNER` / `GST_REGISTRY`, as CrossOver's
+`bin/wine` does. Without those, libgstreamer would load plugins from its
+compiled-in toolchain path while the bundle looked fine.
+
+### 3. Two build-host traps, found by the GStreamer build, that also hit Wine's
+
+- **SDK and linker mismatch.** `/usr/bin/clang` links with Xcode 26.6's
+  `ld-1267`, but the default SDK is CommandLineTools' MacOSX27.0, whose `.tbd`
+  stubs list an `arm64e.x1` arch that `ld-1267` rejects ("tapi error: malformed
+  file"). *Every* link fails, and meson reports it as unrelated missing
+  dependencies (`iconv not found`). Both build scripts now pin
+  `SDKROOT` to the toolchain's own SDK.
+- **The login shell exports `CPATH=/opt/homebrew/include` and
+  `LIBRARY_PATH=/opt/homebrew/lib`.** clang honours both silently, so arm64
+  Homebrew headers leak into x86_64 builds. glib's configure caught it, via an
+  assertion on a foreign `libintl`. Both build scripts now clear them.
+
+### 4. Unbundled ffmpeg, and a build guard that would have ignored the fix
+
+- `winedmo.so` linked Homebrew's ffmpeg by absolute `/usr/local/opt/ffmpeg` path.
+  It was unbundled, and it went unnoticed because nothing checked linked (as opposed to
+  dlopened) libraries. Now `--without-ffmpeg`, matching CrossOver, whose
+  `winedmo.so` links no libav. `build-runtime` now **asserts that no Unix-side
+  module links anything outside the system and `lib/bundled`**.
+- `build-runtime` only ran `configure` when no `Makefile` existed, so a changed
+  flag would have been silently dropped by every rebuild of an existing build
+  dir. It now re-runs configure whenever its arguments change.
+
+### 5. A regression I introduced: GStreamer's libintl stub broke gnutls everywhere
+
+Found the same day, by a Strategic Command trace that happened to log
+`err:winediag:gnutls_process_attach failed to load libgnutls` in every process.
+GStreamer's glib links `libintl.8.dylib` = **proxy-libintl**, a 9 KB stub
+exporting `g_libintl_*`. Homebrew's gnutls links `libintl.8.dylib` = **gettext**,
+exporting `libintl_*`. Same name, disjoint symbols. `bundle-libs` copied flat, so
+the stub overwrote gettext, and `dlopen(libgnutls)` failed with
+`Symbol not found: _libintl_bindtextdomain`. **No TLS in any Wine process**
+between the rebuild and the fix. Steam kept working, presumably because CEF has its own TLS.
+
+Fixed: colliding GStreamer libraries are bundled as `lib<x>-gst.*`, and the map
+is recorded for `build-runtime`. And `bundle-libs` now **dlopens every soname Wine
+uses from an x86_64 process with no fallback path**, because "the file is there"
+is what let this through. That test runs the same check that showed the failure.
+
+### 6. Strategic Command's slow transitions: the game's own x87 audio decoder
+
+Not a regression, and not our runtime. The 32-bit `windowscodecs.dll` is
+instruction-identical before and after the rebuild. Measured:
+
+- a slow Quit (49 s, user-timed) had the main thread in the game's
+  `vorbis.dll`. That DLL is libVorbis 1.1.x with **3013 x87 / 0 SSE** float
+  instructions, and the game decodes whole music tracks on its main thread;
+- `tools/probes/oggprobe` (the game's own `vorbisfile.dll`, `Music/loop3.ogg`,
+  256 s of audio): **51.45 s ours, 51.66 s CrossOver** (confirmed two different
+  Wine builds). Same speed, so this is Rosetta's x87 emulation, not Wine;
+- the same probe with an SSE build of libvorbis 1.3.7: **3.29 s**, identical
+  sample count, max difference 1 LSB (101 dB below signal).
+
+`tools/fixes/vorbis-sse.sh` builds it from pinned, hash-checked sources and
+installs it over the game's DLL with a backup. Wine cannot override a DLL in the
+app's own directory, so it has to be a file swap. After the swap: first music about 5 s,
+Quit under 1 s (user-timed). Expect the same in any 32-bit title that ships an
+x87-only codec; `objdump -d <dll> | grep -c fmul` is the quick check.
+
+An early claim this session, "decoding that PNG took about a minute", was wrong.
+It came from one backtrace that happened to land in libpng. Timed, the PNG
+decodes in ~170 ms.
+
+### Open after this session
+
+- **Re-verified on the rebuilt runtime** (rebuilt in place: same name, same source,
+  `--pe-gcc`, `wine-0004`; plus GStreamer, `--without-ffmpeg` and the pinned SDK):
+  - Strategic Command: main loop `31T`, mixer still `63R` at 1.5%, ~94% userspace,
+    so the x87-fix signature still holds.
+  - Chimera Squad (DXMT): DXMT's d3d11/dxgi and both winemetal halves mapped via
+    the AppDefaults key; ~242% CPU in a mission, 85% userspace; `dxmt-encode-thr`
+    in `63R`; user reports graphics, sound and input fine; exit code 0. Its
+    videos are Bink, so GStreamer is not on its path.
+  - **Not re-checked: Sekiro and Iron Nest.**
+- **Rollback:** `runtimes/winecx-26.3.0-sse-x86_64.pre-gst` is an APFS clone of
+  the runtime from before the rebuild. Delete it once the games above are
+  re-checked.
+- **`build-runtime` names its output `winecx-<ver>-x86_64`**; the `-sse` runtime
+  needs `--name winecx-26.3.0-sse-x86_64`, which PROVENANCE does not record.
+- Tools run outside `gamerun` need `WINEMSYNC=1` (now in `RUNTIME.md` §6), and for
+  anything touching Media Foundation, the `GST_*` variables too.
+
 ## Session 2026-08-28 — Steam startup measured, and a provisioning gap closed
 
 ### Steam client cold start: ~24 s, and ours is NOT slower than CrossOver

@@ -1,0 +1,232 @@
+#!/bin/bash
+# Build a minimal x86_64 GStreamer for winegstreamer into toolchains/.
+#
+#   bin/build-gstreamer            # src/gstreamer at whatever tag it is checked out at
+#   bin/build-gstreamer --force    # reuse the existing meson build dir
+#
+# Output: toolchains/gstreamer-<tag>-x86_64/  (a meson install prefix + PROVENANCE)
+# bin/build-runtime configures Wine against it, and bin/bundle-libs copies the
+# libraries and plugins out of it into the runtime.
+#
+# Source: the GStreamer monorepo, e.g.
+#   git clone --depth 1 --branch 1.28.7 \
+#       https://gitlab.freedesktop.org/gstreamer/gstreamer.git src/gstreamer
+#
+# WHY THIS EXISTS
+#
+# Without GStreamer, Media Foundation in this tree can open nothing by default and
+# decode nothing at all: mfsrcsnk routes containers to the GStreamer byte stream
+# handler unless HKCU\Software\Wine\MediaFoundation\DisableGstByteStreamHandler
+# is set, and msmpeg2vdec's H.264 decoder is only a forward to winegstreamer's
+# CLSID_wg_h264_decoder. Found 2026-10-01 on Fantasy General II, whose Unity
+# player then spins forever at exit (docs/NEXT.md).
+#
+# Why not Homebrew: x86_64 Homebrew has no gstreamer bottle for macOS 27, so
+# `brew install gstreamer` compiles the whole monolithic formula -- ~60
+# dependencies including gtk4 and the Rust plugins -- from source, to bundle a
+# small fraction of it. This builds only what CrossOver ships: the same plugin
+# set as CrossOver.app's lib64/gstreamer-1.0, with H.264 decoded by
+# applemedia (VideoToolbox) rather than by libav, and AAC by atdec (AudioToolbox).
+# atdec moved from applemedia to gst-plugins-good's osxaudio after 1.24, so that
+# plugin is the one deliberate addition to CrossOver's list. Without it, any
+# file with an AAC track fails to open AT ALL: Wine's parser runs every stream
+# through decodebin, and one undecodable stream fails the whole source.
+#
+# It is a cross build (arm64 host, x86_64 target), and pkg-config is pointed at
+# an empty directory on purpose: glib, libffi, pcre2 and orc come from meson
+# subprojects, so neither Homebrew can leak a library into the result.
+
+source "$(dirname "$0")/common.sh"
+set -euo pipefail
+
+FORCE=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --force) FORCE=1; shift ;;
+        *) die "usage: build-gstreamer [--force]" ;;
+    esac
+done
+
+SRC="$GAMES_ROOT/src/gstreamer"
+[ -d "$SRC/subprojects/gst-plugins-bad" ] || die "no GStreamer monorepo at src/gstreamer -- see the header for the clone command"
+SRC_TAG="$(git -C "$SRC" describe --tags --always 2>/dev/null)" || die "src/gstreamer is not a git repo"
+SRC_COMMIT="$(git -C "$SRC" rev-parse HEAD)"
+
+NAME="gstreamer-$SRC_TAG-x86_64"
+OUT="$GAMES_ROOT/toolchains/$NAME"
+BUILD="$GAMES_ROOT/build/$NAME"
+LOG="$GAMES_ROOT/build/$NAME-build.log"
+JOBS="$(sysctl -n hw.ncpu)"
+
+info "building GStreamer $SRC_TAG (x86_64)"
+info "  output   toolchains/$NAME"
+
+# Same pinned meson as bin/build-backend, for the same reason: "meson is
+# installed" is not "meson works here". build-backend owns (re)creating it.
+MESON_VERSION=1.9.1
+MESON="$GAMES_ROOT/toolchains/venv-meson/bin/meson"
+"$MESON" --version 2>/dev/null | grep -qx "$MESON_VERSION" \
+    || die "meson $MESON_VERSION not available at $MESON -- run bin/build-backend once, which recreates the venv"
+
+# --- environment ----------------------------------------------------------
+# The login shell on this host exports CPATH=/opt/homebrew/include and
+# LIBRARY_PATH=/opt/homebrew/lib, which clang honours silently. The header half
+# leaks arm64 Homebrew's libintl.h into an x86_64 build, and glib's configure
+# then asserts on a libintl that is not its own subproject. Clear every
+# variable of that kind rather than trusting the caller's shell.
+unset CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH OBJC_INCLUDE_PATH LIBRARY_PATH \
+      CFLAGS CPPFLAGS CXXFLAGS OBJCFLAGS LDFLAGS PKG_CONFIG_PATH
+
+# --- SDK ------------------------------------------------------------------
+# Pin the SDK to the one that belongs to the selected toolchain. On this host
+# /usr/bin/clang links with Xcode 26.6's ld-1267, but the SDK it finds by default
+# is CommandLineTools' MacOSX27.0.sdk, whose .tbd stubs list an arm64e.x1 arch
+# that ld-1267 rejects ("tapi error: malformed file") -- so EVERY link fails,
+# which meson reports as unrelated missing dependencies ("iconv not found").
+# Measured 2026-10-02: a hello-world link fails by default, succeeds with
+# -isysroot pointing at the toolchain's own SDK.
+SDK="$(DEVELOPER_DIR="$(xcode-select -p)" xcrun --sdk macosx --show-sdk-path)" \
+    || die "cannot resolve the SDK for $(xcode-select -p)"
+export SDKROOT="$SDK"
+info "  sdk      $SDK"
+
+# --- cross file -----------------------------------------------------------
+mkdir -p "$GAMES_ROOT/build" "$BUILD.empty-pkgconfig"
+CROSS="$GAMES_ROOT/build/$NAME-cross.txt"
+cat > "$CROSS" <<EOF
+[binaries]
+c       = ['/usr/bin/clang',   '-arch', 'x86_64']
+cpp     = ['/usr/bin/clang++', '-arch', 'x86_64']
+objc    = ['/usr/bin/clang',   '-arch', 'x86_64']
+objcpp  = ['/usr/bin/clang++', '-arch', 'x86_64']
+ar      = '/usr/bin/ar'
+strip   = '/usr/bin/strip'
+pkg-config = '/opt/homebrew/bin/pkg-config'
+
+[properties]
+# Empty on purpose -- see the header. Everything not in the SDK is a subproject.
+pkg_config_libdir = ['$BUILD.empty-pkgconfig']
+
+[built-in options]
+c_args         = ['-isysroot', '$SDK']
+cpp_args       = ['-isysroot', '$SDK']
+objc_args      = ['-isysroot', '$SDK']
+objcpp_args    = ['-isysroot', '$SDK']
+c_link_args    = ['-isysroot', '$SDK']
+cpp_link_args  = ['-isysroot', '$SDK']
+objc_link_args = ['-isysroot', '$SDK']
+objcpp_link_args = ['-isysroot', '$SDK']
+
+[host_machine]
+system     = 'darwin'
+subsystem  = 'macos'
+kernel     = 'xnu'
+cpu_family = 'x86_64'
+cpu        = 'x86_64'
+endian     = 'little'
+EOF
+
+# --- options --------------------------------------------------------------
+# auto_features=disabled turns off everything that is not named here, in every
+# subproject. The plugin list is CrossOver's (lib64/gstreamer-1.0), one-for-one.
+MESON_ARGS=(
+    --cross-file "$CROSS"
+    --prefix "$OUT"
+    --libdir lib
+    --buildtype release
+    --default-library shared
+    --wrap-mode default
+    -Dauto_features=disabled
+    -Dbase=enabled -Dgood=enabled -Dbad=enabled -Dugly=enabled
+    -Dlibav=disabled -Drs=disabled -Dgpl=disabled
+    -Dorc=enabled
+    -Dtools=enabled                          # gst-inspect-1.0, for verification
+    -Dgstreamer:ptp-helper=disabled
+    # gst-plugins-base
+    -Dgst-plugins-base:app=enabled
+    -Dgst-plugins-base:audioconvert=enabled
+    -Dgst-plugins-base:audioresample=enabled
+    -Dgst-plugins-base:playback=enabled
+    -Dgst-plugins-base:typefind=enabled
+    -Dgst-plugins-base:videoconvertscale=enabled
+    -Dgst-plugins-base:gl=enabled            # applemedia links libgstgl
+    -Dgst-plugins-base:gl_api=opengl
+    -Dgst-plugins-base:gl_platform=cgl
+    -Dgst-plugins-base:gl_winsys=cocoa
+    # gst-plugins-good
+    -Dgst-plugins-good:audioparsers=enabled
+    -Dgst-plugins-good:avi=enabled
+    -Dgst-plugins-good:deinterlace=enabled
+    -Dgst-plugins-good:id3demux=enabled
+    -Dgst-plugins-good:isomp4=enabled
+    -Dgst-plugins-good:wavparse=enabled
+    -Dgst-plugins-good:videofilter=enabled
+    -Dgst-plugins-good:osxaudio=enabled      # atdec (AAC via AudioToolbox) lives here in 1.28;
+                                             # CrossOver's 1.24.4 had it in applemedia
+    # gst-plugins-bad
+    -Dgst-plugins-bad:videoparsers=enabled
+    -Dgst-plugins-bad:applemedia=enabled     # vtdec (H.264 via VideoToolbox)
+    -Dgst-plugins-bad:gl=enabled             # bad has its own gl switch; without it applemedia fails to link
+    # gst-plugins-ugly
+    -Dgst-plugins-ugly:asfdemux=enabled
+)
+
+if [ "$FORCE" = 0 ] && [ -d "$BUILD" ]; then
+    info "  removing previous build dir (use --force to reuse it)"
+    rm -rf "$BUILD"
+fi
+
+info "  configuring (log: build/$NAME-build.log)"
+if [ -d "$BUILD" ]; then
+    "$MESON" setup --reconfigure "${MESON_ARGS[@]}" "$BUILD" "$SRC" >"$LOG" 2>&1 \
+        || { tail -30 "$LOG"; die "meson reconfigure failed -- see $LOG"; }
+else
+    "$MESON" setup "${MESON_ARGS[@]}" "$BUILD" "$SRC" >"$LOG" 2>&1 \
+        || { tail -30 "$LOG"; die "meson setup failed -- see $LOG"; }
+fi
+
+info "  compiling (jobs=$JOBS)"
+ninja -C "$BUILD" -j "$JOBS" >>"$LOG" 2>&1 \
+    || { tail -40 "$LOG"; die "ninja failed -- see $LOG"; }
+rm -rf "$OUT"
+"$MESON" install -C "$BUILD" >>"$LOG" 2>&1 || { tail -20 "$LOG"; die "meson install failed -- see $LOG"; }
+
+# --- verify ---------------------------------------------------------------
+# Every plugin we asked for must exist, be x86_64, and reference nothing from
+# either Homebrew. A missing one is exactly the silent failure this exists for.
+info "verifying"
+PLUGINS=(
+    coreelements typefindfunctions playback app audioconvert audioresample
+    videoconvertscale opengl audioparsers avi deinterlace id3demux isomp4
+    wavparse videofilter videoparsersbad applemedia asf osxaudio
+)
+for p in "${PLUGINS[@]}"; do
+    f="$OUT/lib/gstreamer-1.0/libgst$p.dylib"
+    [ -f "$f" ] || die "plugin $p was not built ($f) -- see $LOG"
+    lipo -archs "$f" | grep -qx x86_64 || die "plugin $p is not x86_64: $(lipo -archs "$f")"
+done
+leaks=$(for f in "$OUT"/lib/*.dylib "$OUT"/lib/gstreamer-1.0/*.dylib "$OUT"/libexec/gstreamer-1.0/*; do
+            [ -f "$f" ] && [ ! -L "$f" ] && otool -L "$f" 2>/dev/null | tail -n +2 | awk '{print $1}'
+        done | grep -E '^/(usr/local|opt/homebrew)/' | sort -u || true)
+[ -z "$leaks" ] || die "the build references Homebrew libraries:
+$leaks"
+[ -x "$OUT/libexec/gstreamer-1.0/gst-plugin-scanner" ] || die "gst-plugin-scanner was not built"
+info "  ${#PLUGINS[@]} plugins present, x86_64, no Homebrew references"
+
+# --- PROVENANCE -----------------------------------------------------------
+{
+    echo "name:              $NAME"
+    echo "source:            https://gitlab.freedesktop.org/gstreamer/gstreamer.git"
+    echo "source_tag:        $SRC_TAG"
+    echo "source_commit:     $SRC_COMMIT"
+    echo "meson:             $MESON_VERSION (toolchains/venv-meson)"
+    echo "sdk:               $SDK"
+    echo "meson_options:     ${MESON_ARGS[*]}"
+    echo "plugins:           ${PLUGINS[*]}"
+    echo "built:             $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    echo "built_by:          bin/build-gstreamer"
+} > "$OUT/PROVENANCE"
+for field in source_commit built; do
+    grep -qE "^$field: +\S" "$OUT/PROVENANCE" || die "PROVENANCE is missing $field"
+done
+info "GStreamer ready: toolchains/$NAME"

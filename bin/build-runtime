@@ -282,19 +282,49 @@ else
 fi
 info "PE compiler: $PE_CC"
 
-CONFIGURE_ARGS="--build=x86_64-apple-darwin --enable-archs=i386,x86_64 --prefix=$PREFIX --disable-tests --with-vulkan $MINGW_ARG --with-freetype --with-gnutls --without-x"
+# GStreamer is ours (bin/build-gstreamer), not Homebrew's, and is required:
+# without it Media Foundation opens nothing by default and decodes no video at
+# all, and games then fail in ways that look like their own bugs (Fantasy
+# General II spins forever at exit). --with-gstreamer makes configure fail
+# rather than skip winegstreamer quietly.
+#
+# --without-ffmpeg matches CrossOver, whose winedmo.so links no libav at all.
+# Ours used to link Homebrew's ffmpeg by absolute /usr/local path -- unbundled,
+# and only reachable because mfsrcsnk prefers GStreamer anyway.
+GST="$GAMES_ROOT/toolchains/$GSTREAMER_TOOLCHAIN"
+[ -f "$GST/lib/pkgconfig/gstreamer-1.0.pc" ] \
+    || die "toolchains/$GSTREAMER_TOOLCHAIN is not built -- run bin/build-gstreamer first"
+
+# The SDK must belong to the selected toolchain. On a host where the default SDK
+# is newer than the linker (CommandLineTools MacOSX27 SDK + Xcode 26.6 ld), every
+# link fails with "tapi error: malformed file" -- see bin/build-gstreamer.
+SDK="$(DEVELOPER_DIR="$(xcode-select -p)" xcrun --sdk macosx --show-sdk-path)" \
+    || die "cannot resolve the SDK for $(xcode-select -p)"
+info "SDK: $SDK"
+
+CONFIGURE_ARGS="--build=x86_64-apple-darwin --enable-archs=i386,x86_64 --prefix=$PREFIX --disable-tests --with-vulkan $MINGW_ARG --with-freetype --with-gnutls --with-gstreamer --without-ffmpeg --without-x"
 build_script="$(mktemp)"
 trap 'rm -f "$build_script"' EXIT
 cat > "$build_script" <<EOF
 #!/bin/zsh
+# A login shell here may export CPATH/LIBRARY_PATH pointing at arm64 Homebrew,
+# which clang honours silently. env-build sets the x86_64 ones it wants.
+unset CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH OBJC_INCLUDE_PATH LIBRARY_PATH
 source "$GAMES_ROOT/bin/env-build-x86_64.sh" || exit 1
 set -e
+export SDKROOT="$SDK"
+export PKG_CONFIG_PATH="$GST/lib/pkgconfig:\$PKG_CONFIG_PATH"
 export CC="gcc -arch x86_64"
 export CXX="g++ -arch x86_64"
 mkdir -p "$BUILD"
 cd "$BUILD"
-if [ ! -f Makefile ]; then
+# Re-run configure whenever its arguments change, not only on a fresh tree.
+# Guarding on "no Makefile" alone meant a changed flag (--with-gstreamer, 2026-10-02)
+# would have been silently ignored by every rebuild of an existing build dir.
+want_args="$SEED $CONFIGURE_ARGS $PE_CFLAGS_ARG SDKROOT=$SDK"
+if [ ! -f Makefile ] || [ "\$(cat .configure-args 2>/dev/null)" != "\$want_args" ]; then
   "$SRC/configure" $SEED $CONFIGURE_ARGS $PE_CFLAGS_ARG
+  print -r -- "\$want_args" > .configure-args
 fi
 make CC="gcc -arch x86_64" -j$JOBS
 make install
@@ -326,6 +356,33 @@ for s in SONAME_LIBVULKAN SONAME_LIBFREETYPE SONAME_LIBGNUTLS SONAME_LIBSDL2; do
     grep -qE "define $s \"/" "$cfg" || die "$s is a bare soname, not an absolute path -- seeding failed"
 done
 info "  sonames are absolute paths into the bundle"
+
+# winegstreamer.so LINKS GStreamer (it is not dlopened by soname), so its load
+# commands name the toolchain. Point them at the bundle copies.
+ws="$PREFIX/lib/wine/x86_64-unix/winegstreamer.so"
+[ -f "$ws" ] || die "winegstreamer.so was not built -- GStreamer was not found by configure"
+while read -r d; do
+    case "$d" in "$GST"/lib/*) ;; *) continue ;; esac
+    b="$(basename "$d")"
+    # bundle-libs renames GStreamer libraries whose name a Homebrew one already
+    # has (libintl.8.dylib: glib's proxy stub vs gettext); follow its map.
+    r=$(awk -v b="$b" '$1==b{print $2}' "$BUNDLE/gstreamer-renames" 2>/dev/null)
+    b="${r:-$b}"
+    [ -e "$BUNDLE/$b" ] || die "winegstreamer.so needs $b, which is not in the bundle"
+    install_name_tool -change "$d" "$BUNDLE/$b" "$ws"
+done < <(otool -L "$ws" | tail -n +2 | awk '{print $1}')
+codesign --force -s - "$ws" >/dev/null 2>&1 || true
+
+# Assert: no Unix-side module links anything outside the system and the bundle.
+# This is the general form of the winedmo/ffmpeg gap: a library linked by
+# absolute Homebrew path works on the build host and nowhere else, and works
+# here only until the next `brew upgrade`.
+outside=$(for f in "$PREFIX"/lib/wine/x86_64-unix/*.so "$PREFIX"/bin/wine*; do
+              [ -f "$f" ] && otool -L "$f" 2>/dev/null | tail -n +2 | awk -v f="${f##*/}" '{print f": "$1}'
+          done | grep -v -E ": (/usr/lib/|/System/|@rpath/|$BUNDLE/)" | sort -u || true)
+[ -z "$outside" ] || die "Unix-side modules link libraries outside the bundle:
+$outside"
+info "  every Unix-side module links only the system and lib/bundled"
 # The 32-bit PE build must use SSE for float math, not x87. This is a silent
 # failure of exactly the kind this script exists to catch: everything builds and
 # runs, and float-heavy 32-bit code is simply ~60x slower under Rosetta. dsound

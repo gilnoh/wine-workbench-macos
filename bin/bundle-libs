@@ -201,6 +201,115 @@ for l in "${WANT[@]}"; do
     [ "$b" = "$real" ] || ln -sf "$real" "$DEST/$b"
 done
 
+# --- GStreamer (winegstreamer) --------------------------------------------
+# Not Homebrew: toolchains/<GSTREAMER_TOOLCHAIN> from bin/build-gstreamer. Unlike
+# the libraries above, winegstreamer.so LINKS these rather than dlopening them,
+# so bin/build-runtime rewrites its load commands to point here after install.
+#
+# Layout matches CrossOver's lib64/: libraries flat in $DEST, plugins in
+# $DEST/gstreamer-1.0/, and bin/gamerun points GST_PLUGIN_SYSTEM_PATH and
+# GST_PLUGIN_SCANNER at them. Without those variables libgstreamer searches its
+# compiled-in plugin directory -- the toolchain -- so the bundle would look fine
+# while loading plugins from outside it.
+GST="$GAMES_ROOT/toolchains/$GSTREAMER_TOOLCHAIN"
+if [ -d "$GST/lib/gstreamer-1.0" ]; then
+    info "bundling GStreamer from toolchains/$GSTREAMER_TOOLCHAIN"
+    rm -rf "$DEST/gstreamer-1.0"; mkdir -p "$DEST/gstreamer-1.0"
+
+    # NAME COLLISIONS. GStreamer's glib links a libintl.8.dylib that is
+    # proxy-libintl -- a 9 KB stub exporting g_libintl_* -- while Homebrew's
+    # gnutls links gettext's libintl.8.dylib, exporting libintl_*. Same file
+    # name, disjoint symbols. Copying flat overwrote the real one, and from
+    # 2026-10-02 until it was caught libgnutls failed to load in EVERY process
+    # ("Symbol not found: _libintl_bindtextdomain") -- no TLS anywhere, with
+    # Steam still working because CEF brings its own. So a GStreamer library
+    # whose name is already taken is bundled as lib<x>-gst.<rest>, and the
+    # GStreamer side is relinked to that name. The map is written for
+    # bin/build-runtime, which relinks winegstreamer.so the same way.
+    RENAMES="$DEST/gstreamer-renames"; : > "$RENAMES"
+    gst_name() {  # toolchain basename -> basename in the bundle
+        local b="$1" r
+        r=$(awk -v b="$b" '$1==b{print $2}' "$RENAMES")
+        echo "${r:-$b}"
+    }
+    for f in "$GST"/lib/*.dylib; do
+        [ -L "$f" ] && continue
+        b="$(basename "$f")"
+        if have "$b"; then
+            nb="${b%%.*}-gst.${b#*.}"
+            echo "$b $nb" >> "$RENAMES"
+            info "  name collision: GStreamer's $b bundled as $nb"
+            b="$nb"
+        fi
+        cp -f "$f" "$DEST/$b"; chmod u+w "$DEST/$b"
+    done
+    for f in "$GST"/lib/*.dylib; do
+        [ -L "$f" ] || continue
+        b="$(basename "$f")"; have "$b" && continue
+        ln -sf "$(gst_name "$(readlink "$f")")" "$DEST/$b"
+    done
+    cp -f "$GST"/lib/gstreamer-1.0/*.dylib "$DEST/gstreamer-1.0/"
+    cp -f "$GST/libexec/gstreamer-1.0/gst-plugin-scanner" "$DEST/gst-plugin-scanner"
+    chmod u+w "$DEST"/gstreamer-1.0/*.dylib "$DEST/gst-plugin-scanner"
+
+    # Rewrite every reference into the toolchain. Libraries and the scanner sit
+    # in $DEST (@loader_path/x); plugins one level down (@loader_path/../x).
+    relink() {  # file  loader-prefix
+        local f="$1" pre="$2" d
+        while read -r d; do
+            case "$d" in "$GST"/lib/*|@rpath/*) ;; *) continue ;; esac
+            install_name_tool -change "$d" "$pre$(gst_name "$(basename "$d")")" "$f" 2>/dev/null
+        done < <(otool -L "$f" | tail -n +2 | awk '{print $1}')
+        # meson also records an LC_RPATH into the toolchain on some targets
+        while read -r r; do
+            install_name_tool -delete_rpath "$r" "$f" 2>/dev/null || true
+        done < <(otool -l "$f" | awk '/LC_RPATH/{getline; getline; print $2}' | grep "^$GST" || true)
+        codesign --force -s - "$f" >/dev/null 2>&1 || true
+    }
+    for f in "$DEST"/libgst*.dylib "$DEST"/libglib*.dylib "$DEST"/libgobject*.dylib \
+             "$DEST"/libgmodule*.dylib "$DEST"/libgio*.dylib "$DEST"/libgthread*.dylib \
+             "$DEST"/libffi*.dylib "$DEST"/libpcre2*.dylib "$DEST"/*-gst.*.dylib \
+             "$DEST"/liborc*.dylib "$DEST"/libz*.dylib "$DEST/gst-plugin-scanner"; do
+        [ -f "$f" ] && [ ! -L "$f" ] || continue
+        case "$f" in *.dylib) install_name_tool -id "@loader_path/$(basename "$f")" "$f" 2>/dev/null ;; esac
+        relink "$f" "@loader_path/"
+    done
+    # A plugin's own install name (LC_ID_DYLIB, otool -L's first entry) names
+    # the toolchain too; nothing loads by it, but it is a path out of the bundle.
+    for f in "$DEST"/gstreamer-1.0/*.dylib; do
+        install_name_tool -id "@loader_path/$(basename "$f")" "$f" 2>/dev/null
+        relink "$f" "@loader_path/../"
+    done
+
+    # Assert: nothing in the GStreamer bundle still points at the toolchain.
+    left=$(for f in "$DEST"/gstreamer-1.0/*.dylib "$DEST"/libgst*.dylib "$DEST"/libglib*.dylib \
+                    "$DEST"/libgobject*.dylib "$DEST/gst-plugin-scanner"; do
+               [ -f "$f" ] && [ ! -L "$f" ] && otool -L "$f" | tail -n +2 | awk '{print $1}'
+           done | grep -E "^$GST|^/usr/local|^/opt/homebrew" | sort -u || true)
+    [ -z "$left" ] || die "GStreamer bundle still references outside paths:
+$left"
+    info "  $(ls "$DEST"/gstreamer-1.0 | wc -l | tr -d ' ') plugins + gst-plugin-scanner, all references inside the bundle"
+else
+    info "  note: toolchains/$GSTREAMER_TOOLCHAIN not built -- no GStreamer (bin/build-gstreamer)"
+fi
+
+# --- load test ------------------------------------------------------------
+# "The file is in the bundle" is not "it loads": the libintl collision above
+# left every file present and gnutls unloadable. dlopen each soname Wine looks
+# for, from an x86_64 process with no fallback path -- what Wine itself does.
+SDK="$(DEVELOPER_DIR="$(xcode-select -p)" xcrun --sdk macosx --show-sdk-path)"
+probe="$(mktemp -d)/dlprobe"
+printf '#include <dlfcn.h>\n#include <stdio.h>\nint main(int c,char**v){int r=0;for(int i=1;i<c;i++){void*h=dlopen(v[i],RTLD_NOW);if(!h){printf("%%s\\n",dlerror());r=1;}}return r;}\n' \
+    | env -u CPATH -u LIBRARY_PATH clang -arch x86_64 -isysroot "$SDK" -x c -o "$probe" - \
+    || die "could not build the dlopen probe"
+loadlist=()
+for l in "${WANT[@]}"; do loadlist+=("$DEST/$(basename "$l")"); done
+[ -e "$DEST/libgstreamer-1.0.0.dylib" ] && loadlist+=("$DEST/libgstreamer-1.0.0.dylib" "$DEST"/gstreamer-1.0/*.dylib)
+out=$(env -u DYLD_FALLBACK_LIBRARY_PATH -u DYLD_LIBRARY_PATH arch -x86_64 "$probe" "${loadlist[@]}" 2>&1) \
+    || die "bundled libraries fail to load:
+$out"
+info "  load test: ${#loadlist[@]} libraries dlopen cleanly with no fallback path"
+
 echo
 info "bundled $(ls "$DEST" | wc -l | tr -d ' ') files:"
 ls "$DEST" | sed 's|^|    |'

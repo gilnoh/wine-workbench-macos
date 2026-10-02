@@ -8,6 +8,13 @@
 #   dxgiprobe  which GPU adapter (vendor/device) Wine reports to the app
 #   xinputprobe what XInput reports -- slots, buttons, sticks, triggers
 #   dinputprobe what DirectInput8 enumerates, acquires and reads
+#   mfprobe    whether Media Foundation can open AND decode a file: resolver,
+#              source reader, native stream types, then 30 decoded video frames.
+#              Opening and decoding fail separately -- c00d36c4 (no byte stream
+#              handler) vs c00d5212 (no decoder) -- so it reports both.
+#   oggprobe   how fast an APPLICATION'S OWN vorbisfile.dll decodes a file
+#              (32-bit; x87-only codecs are ~16x slower under Rosetta)
+#   imgprobe   how long GDI+ takes to load and decode an image (32 + 64-bit)
 #
 # Run xinputprobe and dinputprobe as a pair. A pad can be perfect on one API and
 # absent on the other, because winexinput.sys splits an XInput-capable gamepad
@@ -28,7 +35,7 @@ set -eu
 cd "$(dirname "$0")"
 CC=${CC:-/opt/homebrew/bin/x86_64-w64-mingw32-gcc}
 CXX=${CXX:-/opt/homebrew/bin/x86_64-w64-mingw32-g++}
-"$CC"  -O1 -municode -o vkprobe.exe   vkprobe.c
+"$CC"  -O1 -mconsole -o vkprobe.exe   vkprobe.c    # main(), not wmain()
 "$CXX" -O1 -municode -o dwprobe.exe   dwprobe.cpp  -ldwrite -lole32
 "$CXX" -O1 -municode -o dxgiprobe.exe dxgiprobe.cpp -ldxgi  -lole32
 
@@ -39,6 +46,15 @@ CXX=${CXX:-/opt/homebrew/bin/x86_64-w64-mingw32-g++}
 
 # Host-side, and x86_64 on purpose: the runtime runs under Rosetta and the two
 # Homebrew prefixes hold different SDL builds.
-clang -arch x86_64 -O0 -o sdlopen sdlopen.c
+# Pin the SDK to the selected toolchain's own: with CommandLineTools' MacOSX27
+# SDK and Xcode 26.6's linker every link fails ("tapi error: malformed file").
+SDK="$(DEVELOPER_DIR="$(xcode-select -p)" xcrun --sdk macosx --show-sdk-path)"
+clang -arch x86_64 -isysroot "$SDK" -O0 -o sdlopen sdlopen.c
 
-echo "built: vkprobe.exe dwprobe.exe dxgiprobe.exe xinputprobe.exe dinputprobe.exe sdlopen"
+"$CC"  -O1 -municode -o mfprobe.exe mfprobe.c -lmfplat -lmfreadwrite -lmfuuid -lole32 -luuid
+CC32=${CC32:-/opt/homebrew/bin/i686-w64-mingw32-gcc}
+"$CC32" -O1 -mconsole -o oggprobe32.exe oggprobe.c
+"$CC32" -O1 -municode -o imgprobe32.exe imgprobe.c -lgdiplus
+"$CC"   -O1 -municode -o imgprobe64.exe imgprobe.c -lgdiplus
+
+echo "built: vkprobe.exe dwprobe.exe dxgiprobe.exe xinputprobe.exe dinputprobe.exe sdlopen mfprobe.exe oggprobe32.exe imgprobe32.exe imgprobe64.exe"

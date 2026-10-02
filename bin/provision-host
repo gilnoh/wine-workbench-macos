@@ -29,6 +29,20 @@ PKGS_ARM="cabextract"
 fail=0
 note() { printf "  %-52s %s\n" "$1" "$2"; }
 
+# Rosetta 2 first: without it nothing else here matters, and its absence looks
+# like a broken runtime ("Bad CPU type in executable" from bin/wine) rather than
+# a host gap. A macOS update can leave a machine without it -- found 2026-10-01
+# on macOS 27.0.1, where /Library/Apple/usr/libexec/oah held only RosettaLinux.
+# Test by running x86_64 code, not by looking for files. Installing needs sudo,
+# so this only reports.
+echo "== Rosetta 2 =="
+if arch -x86_64 /usr/bin/true 2>/dev/null; then
+    note "x86_64 execution" "ok"
+else
+    note "x86_64 execution" "MISSING -- run: sudo softwareupdate --install-rosetta --agree-to-license"
+    fail=1
+fi
+
 echo "== Homebrew packages (x86_64, /usr/local) =="
 for p in $PKGS_X86; do
     if "$BREW_X86" list --versions "$p" >/dev/null 2>&1; then

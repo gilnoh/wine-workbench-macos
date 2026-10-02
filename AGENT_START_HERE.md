@@ -52,9 +52,18 @@ curl -O https://media.codeweavers.com/pub/crossover/source/crossover-sources-<VE
 tar xzf crossover-sources-<VER>.tar.gz    # -> sources/wine
 cd sources/wine && git init -b vendor . && git add -A && git commit -m 'pristine'
 
-bin/build-runtime --winecx <VER> --pe-gcc  # ~25 min
+git clone --depth 1 --branch 1.28.7 \
+    https://gitlab.freedesktop.org/gstreamer/gstreamer.git src/gstreamer
+bin/build-gstreamer                        # ~10 min; build-runtime requires it
+
+bin/build-runtime --winecx <VER> --pe-gcc  # ~25 min; --name <runtime-name> to pick the name
 bin/get-addons <runtime-name>              # Wine Mono + Gecko; a source build has neither
 ```
+
+GStreamer is **built, not installed**: x86_64 Homebrew has no bottle for current
+macOS, and without GStreamer Media Foundation in this tree opens and decodes
+nothing — games then fail in ways that look like their own bugs. The reasons and
+the plugin list are in `bin/build-gstreamer`.
 
 The `git init` is **required**, not tidiness: `build-runtime` refuses to build a source
 tree that is not its own git repository, because `git apply` run inside another repo

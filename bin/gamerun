@@ -90,6 +90,24 @@ env_args=(
 # is CEF too. A profile can still override it via PROFILE_ENV.
 env_args+=( 'WINE_APPEND_ARGS=steamwebhelper.exe=--no-sandbox --in-process-gpu --disable-gpu' )
 
+# GStreamer (winegstreamer, i.e. Media Foundation video/audio). Same scheme as
+# CrossOver's bin/wine: the runtime's bundled plugins ARE the system plugins,
+# and the registry cache lives with the prefix. Without GST_PLUGIN_SYSTEM_PATH,
+# libgstreamer searches the directory compiled into it -- toolchains/ -- so a
+# runtime would appear to work while loading plugins from outside its bundle.
+# GST_PLUGIN_PATH is cleared so nothing from the caller's shell is added.
+# Set for every launch for the same reason as WINE_APPEND_ARGS: a Steam game is
+# spawned by the client and gets the client's environment.
+GST_BUNDLE="$RUNTIMES_DIR/$RUNTIME/lib/bundled"
+if [ -d "$GST_BUNDLE/gstreamer-1.0" ]; then
+    env_args+=(
+        GST_PLUGIN_SYSTEM_PATH="$GST_BUNDLE/gstreamer-1.0"
+        GST_PLUGIN_PATH=
+        GST_PLUGIN_SCANNER="$GST_BUNDLE/gst-plugin-scanner"
+        GST_REGISTRY="$PREFIX_PATH/gstreamer-1.0-registry.x86_64.bin"
+    )
+fi
+
 # Deliberately NOT setting VK_ICD_FILENAMES. Pointing it at MoltenVK's own ICD
 # is actively harmful: that manifest carries is_portability_driver:true, so the
 # Khronos loader hides the driver from any application that does not opt into

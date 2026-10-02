@@ -24,6 +24,8 @@ LIBRARY_DIR="$GAMES_ROOT/library"
 # bug (docs/RUNTIME.md section 4). bin/build-runtime now guarantees SSE for every
 # build and fails otherwise, so a future rebuild can drop the suffix.
 DEFAULT_RUNTIME="winecx-26.3.0-sse-x86_64"
+# Output of bin/build-gstreamer that bundle-libs and build-runtime use.
+GSTREAMER_TOOLCHAIN="gstreamer-1.28.7-x86_64"
 
 die()  { echo "error: $*" >&2; exit 1; }
 info() { echo "==> $*"; }

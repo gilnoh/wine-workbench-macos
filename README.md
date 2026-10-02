@@ -131,8 +131,13 @@ cd ../..
 #        git clone <winecx-sources> src/crossover
 #     CodeWeavers' tarball above remains the authoritative source either way.)
 
-# 3. build (~25 min)
-bin/build-runtime --winecx 26.3.0 --pe-gcc
+# 3. GStreamer for Media Foundation video (~10 min; built, not from Homebrew)
+git clone --depth 1 --branch 1.28.7 \
+    https://gitlab.freedesktop.org/gstreamer/gstreamer.git src/gstreamer
+bin/build-gstreamer
+
+# 3b. build the runtime (~25 min)
+bin/build-runtime --winecx 26.3.0 --pe-gcc --name winecx-26.3.0-sse-x86_64
 
 # 4. addons a source build does not include
 bin/get-addons winecx-26.3.0-sse-x86_64
