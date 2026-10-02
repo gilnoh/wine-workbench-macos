@@ -24,7 +24,14 @@ ICD=/usr/local/etc/vulkan/icd.d/MoltenVK_icd.json
 # below: it is not enough for a file named libSDL2-2.0.0.dylib to exist.
 PKGS_X86="molten-vk vulkan-loader freetype gnutls bison mingw-w64 sdl2 sdl3"
 # arm64 Homebrew: host-side tools only.
-PKGS_ARM="cabextract"
+#   cabextract   Unity's .pd_ symbol files, winetricks
+#   ninja        meson's backend for bin/build-gstreamer and bin/build-backend
+#   pkgconf      the pkg-config bin/build-gstreamer's cross file names
+#                (/opt/homebrew/bin/pkg-config; it is pointed at an empty dir)
+#   llvm         llvm-objdump for tools/fixes/vorbis-sse.sh's checks, and
+#                llvm-pdbutil/-undname for Unity symbols (/opt/homebrew/opt/llvm)
+#   mingw-w64    tools/probes and tools/fixes (/opt/homebrew/bin/*-mingw32-gcc)
+PKGS_ARM="cabextract ninja pkgconf llvm mingw-w64"
 
 fail=0
 note() { printf "  %-52s %s\n" "$1" "$2"; }

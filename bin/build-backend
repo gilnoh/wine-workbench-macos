@@ -90,17 +90,7 @@ done
 # i.e. the same not-relocatable failure documented for runtimes and prefixes in
 # AGENT_START_HERE.md, in a place nobody thought to look. Recreating the venv is
 # seconds, so this script just repairs it rather than telling a human to.
-MESON_VERSION=1.9.1
-VENV="$GAMES_ROOT/toolchains/venv-meson"
-MESON="$VENV/bin/meson"
-if ! "$MESON" --version 2>/dev/null | grep -qx "$MESON_VERSION"; then
-    info "  (re)creating toolchains/venv-meson with meson $MESON_VERSION"
-    rm -rf "$VENV"
-    python3 -m venv "$VENV" || die "could not create the meson venv"
-    "$VENV/bin/pip" -q install "meson==$MESON_VERSION" || die "could not install meson $MESON_VERSION"
-fi
-"$MESON" --version 2>/dev/null | grep -qx "$MESON_VERSION" \
-    || die "meson $MESON_VERSION still not available at $MESON"
+ensure_meson                                  # bin/common.sh
 
 # --- version and output name ----------------------------------------------
 #

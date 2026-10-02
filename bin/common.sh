@@ -113,3 +113,26 @@ load_profile() {
     fi
     PREFIX_PATH="$PREFIXES_DIR/$PREFIX"
 }
+
+# The pinned meson, in toolchains/venv-meson, (re)created on demand. Used by
+# bin/build-backend and bin/build-gstreamer. The pin is load-bearing: Homebrew's
+# meson 1.10.1 crashes configuring DXMT's cross build (KeyError
+# build.cpp_importstd). The venv is recreated rather than trusted because a
+# venv's scripts are shebanged with an absolute path, so a renamed checkout
+# leaves it dead. It lives here, not in either build script, because
+# build-gstreamer must run BEFORE the runtime exists and build-backend AFTER --
+# when only build-backend created it, a fresh checkout could build neither.
+MESON_VERSION=1.9.1
+MESON="$GAMES_ROOT/toolchains/venv-meson/bin/meson"
+ensure_meson() {
+    local venv="$GAMES_ROOT/toolchains/venv-meson"
+    if ! "$MESON" --version 2>/dev/null | grep -qx "$MESON_VERSION"; then
+        info "  (re)creating toolchains/venv-meson with meson $MESON_VERSION"
+        rm -rf "$venv"
+        mkdir -p "$GAMES_ROOT/toolchains"
+        python3 -m venv "$venv" || die "could not create the meson venv"
+        "$venv/bin/pip" -q install "meson==$MESON_VERSION" || die "could not install meson $MESON_VERSION"
+    fi
+    "$MESON" --version 2>/dev/null | grep -qx "$MESON_VERSION" \
+        || die "meson $MESON_VERSION still not available at $MESON"
+}

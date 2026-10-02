@@ -61,12 +61,8 @@ JOBS="$(sysctl -n hw.ncpu)"
 info "building GStreamer $SRC_TAG (x86_64)"
 info "  output   toolchains/$NAME"
 
-# Same pinned meson as bin/build-backend, for the same reason: "meson is
-# installed" is not "meson works here". build-backend owns (re)creating it.
-MESON_VERSION=1.9.1
-MESON="$GAMES_ROOT/toolchains/venv-meson/bin/meson"
-"$MESON" --version 2>/dev/null | grep -qx "$MESON_VERSION" \
-    || die "meson $MESON_VERSION not available at $MESON -- run bin/build-backend once, which recreates the venv"
+# The pinned meson, shared with bin/build-backend; see ensure_meson in common.sh.
+ensure_meson
 
 # --- environment ----------------------------------------------------------
 # The login shell on this host exports CPATH=/opt/homebrew/include and
