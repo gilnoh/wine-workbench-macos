@@ -23,7 +23,22 @@
 # cross-process blits is byte-identical to upstream. 23950 keys on a foreign
 # *parent*; our bug is a foreign *painter*. See docs/RUNTIME.md section 2.
 workaround    wine-0004-kernelbase-append-args-env.patch
+# CodeWeavers' msync leaked one wait registration every time the client's
+# contention shortcut fired: it returned STATUS_PENDING without unregistering,
+# so the server kept the thread on the wait list of every unsignaled object.
+# On an event that never fires (a worker's quit event) the list only grows,
+# until the 0x80000-node pool is exhausted ("msync: warn: node memory pool
+# exhausted", all cores busy). Measured with wine-0006 + tools/probes/waitprobe:
+# leaked nodes == registrations without unregister == contention returns.
+# Candidate to report to CodeWeavers.
+fix           wine-0007-msync-unregister-on-contention.patch
 debug         wine-0005-winemac-surface-flush-trace.patch
+# Fantasy General II, 2026-10-02: after long play, wineserver floods
+# "msync: warn: node memory pool exhausted" and all cores saturate. The pool is
+# 0x80000 wait registrations, so they are leaking. Counts adds/removes/signal
+# frees in wineserver and the client's contention shortcut (which returns
+# without unregistering). Silent unless WINEMSYNC_STATS=1.
+debug         wine-0006-msync-node-pool-stats.patch
 
 # DXMT (built separately, see backends/)
 fix           dxmt-0001-include-iomanip.patch

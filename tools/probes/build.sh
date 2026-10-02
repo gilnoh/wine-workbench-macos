@@ -15,6 +15,9 @@
 #   oggprobe   how fast an APPLICATION'S OWN vorbisfile.dll decodes a file
 #              (32-bit; x87-only codecs are ~16x slower under Rosetta)
 #   imgprobe   how long GDI+ takes to load and decode an image (32 + 64-bit)
+#   waitprobe  msync wait-registration stress: WaitForMultipleObjects({quit,
+#              work}) ping-pong; with WINEMSYNC_STATS=1 on a wine-0006 runtime,
+#              a rising in_use is the node-pool leak that wine-0007 fixes
 #
 # Run xinputprobe and dinputprobe as a pair. A pad can be perfect on one API and
 # absent on the other, because winexinput.sys splits an XInput-capable gamepad
@@ -56,5 +59,6 @@ CC32=${CC32:-/opt/homebrew/bin/i686-w64-mingw32-gcc}
 "$CC32" -O1 -mconsole -o oggprobe32.exe oggprobe.c
 "$CC32" -O1 -municode -o imgprobe32.exe imgprobe.c -lgdiplus
 "$CC"   -O1 -municode -o imgprobe64.exe imgprobe.c -lgdiplus
+"$CC"   -O1 -mconsole -o waitprobe.exe waitprobe.c
 
-echo "built: vkprobe.exe dwprobe.exe dxgiprobe.exe xinputprobe.exe dinputprobe.exe sdlopen mfprobe.exe oggprobe32.exe imgprobe32.exe imgprobe64.exe"
+echo "built: vkprobe.exe dwprobe.exe dxgiprobe.exe xinputprobe.exe dinputprobe.exe sdlopen mfprobe.exe oggprobe32.exe imgprobe32.exe imgprobe64.exe waitprobe.exe"

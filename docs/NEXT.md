@@ -132,6 +132,27 @@ An early claim this session, "decoding that PNG took about a minute", was wrong.
 It came from one backtrace that happened to land in libpng. Timed, the PNG
 decodes in ~170 ms.
 
+### 7. msync leaked a wait registration on every contention return (CodeWeavers bug, fixed here)
+
+Symptom (Fantasy General II, after long play): wineserver floods `msync: warn: node memory pool exhausted`, all cores saturate, the game stutters to a halt. The pool (`server/msync.c`) is `0x80000` = 524,288 "thread T waits on object X" nodes, so registrations were leaking.
+
+**The mechanism, measured.** `msync_wait_multiple` (`dlls/ntdll/unix/msync.c`) sends its register message, then spins on `check_shm_contention`. If that sees an object already signaled, it returns `STATUS_PENDING` *without* `server_remove_wait`. The server still processes the queued registration and adds the thread to every object it finds unsignaled. Those nodes are freed only by a later server-side signal of that object. For a worker's quit event, which never fires, that is never. `wine-0006` (debug) counts it, and `tools/probes/waitprobe` reproduces it in two seconds with `WaitForMultipleObjects({quit, work})`:
+
+| 200,000 round trips | in_use nodes | longest list | regs − unregs | contention returns |
+| --- | --- | --- | --- | --- |
+| before (CX 26.3.0 as shipped) | 4,051, rising | 4,002 (the quit event) | 4,017 | 4,000+ |
+| after `wine-0007` | ~50, flat | 5 | 17 (live waits) | 8,000+ |
+
+Three independent counters agree: leaked nodes, registrations without an unregister, and contention returns.
+
+**The fix** (`wine-0007`, class `fix`): the shortcut calls `server_remove_wait` like every other exit path. That also drops `multiple_waiters` on the alert object, which the hand-written loop it replaces missed. **In the game:** a long Fantasy General II session with the fix showed 7.18 M contention returns and 32.8 M registrations, with in_use flat at ~230 (peak 254). No stutter, no exhaustion. Before the fix, each of those contention returns would have leaked at least one node.
+
+**Cost, measured; cause OPEN.** `waitprobe` is slower with the fix in every one of 5 interleaved pairs (unpatched vs fixed, alternating so both see the same machine state): **8.1 µs vs 13.1 µs** mean per round trip, about +60%. Runs taken minutes apart vary by more than that (the same fixed build measured 9.6, then 11.6–14.6 µs), so only interleaved numbers are worth comparing. The cause is *not* established. One extra unregister message per contention return looks too small for it, and the stats build showed the fixed runtime making ~2× the server registrations for the same work (202 k vs 101 k), which suggests the fix changes how often waits reach the server at all. That is the next thing to explain, before any report to CodeWeavers. No slowdown was noticeable in the game. (An earlier "~30%" here compared non-interleaved runs and was wrong.)
+
+CrossOver.app's own `wineserver` carries the same message, and the code is CodeWeavers' msync, not upstream Wine. **This is a genuine report candidate for CodeWeavers**, with a minimal repro (`waitprobe`) and the numbers above. It has not been reported.
+
+Also noted, not chased: on the register path the server only unregisters already-added objects `if (i > 1)`, so an object at index 1 found signaled leaves index 0's node behind. On that path the client's own `server_remove_wait` cleans up afterwards, so it is not a leak today. It looks like an off-by-one (`i > 0`) that only works because the client is thorough.
+
 ### Open after this session
 
 - **Re-verified on the rebuilt runtime** (rebuilt in place: same name, same source,

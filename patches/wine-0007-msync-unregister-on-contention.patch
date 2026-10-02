@@ -1,0 +1,67 @@
+From: Gil Noh <nohtaegil@gmail.com>
+Subject: [PATCH] ntdll: Unregister an msync wait when the contention check returns early.
+
+msync_wait_multiple() sends its register message to wineserver and then
+spins on check_shm_contention(). When that sees an object already
+signaled it returns STATUS_PENDING without calling server_remove_wait(),
+unlike every other exit path. The server still processes the queued
+registration and adds the thread to the wait list of each object it finds
+unsignaled. Those nodes are freed only by a later server-side signal of
+the same object, so for an object that is never signaled -- typically a
+worker thread's quit event in WaitForMultipleObjects({quit, work}) -- one
+node leaks per early return.
+
+The node pool in server/msync.c holds 0x80000 entries. A long session of
+Fantasy General II (Unity 2018.4) took the early return millions of times,
+exhausted the pool ("msync: warn: node memory pool exhausted" on every
+allocation) and saturated every core.
+
+Reproduced with a two-thread WaitForMultipleObjects({quit, work})
+ping-pong, 200,000 round trips, with wineserver node accounting:
+
+                         in_use nodes      longest list   regs - unregs
+  without this patch     4,051, rising     4,002          4,017
+  with this patch        ~50, flat         5              17 (live waits)
+
+The leaked-node count, registrations without an unregister and early
+returns agree. With the patch, a long Fantasy General II session showed
+7.18 M early returns and 32.8 M registrations with in_use flat at ~230.
+
+server_remove_wait() also drops multiple_waiters, including on the alert
+object, which the open-coded loop it replaces did not.
+
+Known cost, cause not yet understood: on the microbenchmark above the
+patched build is slower per round trip (8.1 us -> 13.1 us mean over five
+interleaved pairs) and makes about twice as many server registrations for
+the same work. Not noticeable in the game.
+
+Against CrossOver 26.3.0 sources (Wine 11.0). LGPL-2.1-or-later.
+---
+diff --git a/dlls/ntdll/unix/msync.c b/dlls/ntdll/unix/msync.c
+index ae46bf3..bfa5685 100644
+--- a/dlls/ntdll/unix/msync.c
++++ b/dlls/ntdll/unix/msync.c
+@@ -377,15 +377,14 @@ static NTSTATUS msync_wait_multiple( const int *objs, void **objs_shm, int alert
+     {
+         if (check_shm_contention( objs_shm, alert_obj_shm, count, tid ))
+         {
+-            int i;
+-            for (i = 0; i < count; i++)
+-            {
+-                struct event *obj = (struct event *)objs_shm[i];
+-
+-                int refs = __atomic_sub_fetch( &obj->multiple_waiters, 1, __ATOMIC_SEQ_CST);
+-                if (refs < 0)
+-                    __atomic_store_n( &obj->multiple_waiters, 0, __ATOMIC_SEQ_CST);
+-            }
++            /* The register message is already queued, and the server will add
++             * this thread to the wait lists of every object it finds unsignaled.
++             * Unregister, as every other exit path does: otherwise those nodes
++             * stay on the lists until the object is next signaled through the
++             * server, which for an event that never fires is never, and the
++             * server's node pool is eventually exhausted. server_remove_wait
++             * also drops multiple_waiters, including on the alert object. */
++            server_remove_wait( msgh_id, objs, objs_shm, alert_obj, alert_obj_shm, count );
+             return STATUS_PENDING;
+         }
+     }

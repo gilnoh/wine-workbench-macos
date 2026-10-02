@@ -483,6 +483,7 @@ Never run two prefixes' Steam clients at once — they share `S:\steamapps`.
 | `mfprobe` | can Media Foundation open a file, and can it **decode** it (two separate failures) |
 | `oggprobe32` | how fast an application's **own** `vorbisfile.dll` decodes a file; run it here and under CrossOver |
 | `imgprobe32/64` | how long GDI+ takes to load and decode an image |
+| `waitprobe` | does msync leak wait registrations (`WINEMSYNC_STATS=1` on a `wine-0006` build) |
 
 Plus the surface dump (`patches/wine-0005`, class `debug`): set
 `WINE_DUMP_SURFACE=<dir>` and render the raw BGRA with

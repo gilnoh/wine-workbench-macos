@@ -1,0 +1,133 @@
+diff --git a/dlls/ntdll/unix/msync.c b/dlls/ntdll/unix/msync.c
+--- a/dlls/ntdll/unix/msync.c
++++ b/dlls/ntdll/unix/msync.c
+@@ -384,6 +384,15 @@
+              * server, which for an event that never fires is never, and the
+              * server's node pool is eventually exhausted. server_remove_wait
+              * also drops multiple_waiters, including on the alert object. */
++            /* debug (wine-0006): count contention returns */
++            {
++                static int enabled = -1;
++                static unsigned long long hits;
++                if (enabled == -1) enabled = getenv( "WINEMSYNC_STATS" ) && atoi( getenv( "WINEMSYNC_STATS" ) );
++                if (enabled && !(++hits % 1000))
++                    fprintf( stderr, "msync-stat[client %d]: contention returns: %llu (count=%d)\n",
++                             (int)getpid(), hits, count );
++            }
+             server_remove_wait( msgh_id, objs, objs_shm, alert_obj, alert_obj_shm, count );
+             return STATUS_PENDING;
+         }
+diff --git a/server/msync.c b/server/msync.c
+--- a/server/msync.c
++++ b/server/msync.c
+@@ -160,6 +160,7 @@
+ };
+ 
+ static struct node_memory_pool *pool;
++static void mstat_report( const char *why );   /* debug (wine-0006) */
+ 
+ static void pool_init(void)
+ {
+@@ -178,6 +179,7 @@
+     if (pool->count == 0)
+     {
+         fprintf( stderr, "msync: warn: node memory pool exhausted\n" );
++        { static int once; if (!once++) mstat_report( "exhausted" ); }
+         return malloc( sizeof(struct tid_node) );
+     }
+     return pool->free_nodes[--pool->count];
+@@ -196,7 +198,28 @@
+ struct tid_list
+ {
+     struct tid_node *head;
++    unsigned int len;      /* debug: WINEMSYNC_STATS */
+ };
++
++/* debug (wine-0006): node accounting, printed when WINEMSYNC_STATS=1 */
++static struct
++{
++    unsigned long long adds, removes, remove_miss, sig_freed, regs, unregs, early_wake;
++    long long in_use, peak;
++    unsigned int max_len, max_len_idx;
++    int enabled;
++} mstat = { .enabled = -1 };
++
++static void mstat_report( const char *why )
++{
++    if (mstat.enabled == -1) mstat.enabled = getenv( "WINEMSYNC_STATS" ) && atoi( getenv( "WINEMSYNC_STATS" ) );
++    if (!mstat.enabled) return;
++    fprintf( stderr, "msync-stat[%s]: in_use=%lld peak=%lld pool_free=%u max_list=%u(idx %u) "
++             "adds=%llu removes=%llu remove_miss=%llu sig_freed=%llu regs=%llu unregs=%llu early_wake=%llu\n",
++             why, mstat.in_use, mstat.peak, pool->count, mstat.max_len, mstat.max_len_idx,
++             mstat.adds, mstat.removes, mstat.remove_miss, mstat.sig_freed, mstat.regs, mstat.unregs,
++             mstat.early_wake );
++}
+ 
+ static struct tid_list *tid_map;
+ static size_t tid_map_size;
+@@ -233,6 +256,12 @@
+ 
+     new_node->next = list->head;
+     list->head = new_node;
++
++    list->len++;
++    mstat.adds++;
++    if (++mstat.in_use > mstat.peak) mstat.peak = mstat.in_use;
++    if (list->len > mstat.max_len) { mstat.max_len = list->len; mstat.max_len_idx = shm_idx; }
++    if (!(mstat.adds % 50000)) mstat_report( "periodic" );
+ }
+ 
+ static inline void remove_tid( unsigned int shm_idx, int tid )
+@@ -250,11 +279,15 @@
+             else
+                 prev->next = current->next;
+             pool_free(current);
+-            break;
++            list->len--;
++            mstat.removes++;
++            mstat.in_use--;
++            return;
+         }
+         prev = current;
+         current = current->next;
+     }
++    mstat.remove_miss++;
+ }
+ 
+ static long pagesize;
+@@ -354,6 +387,7 @@
+ 
+     current = list->head;
+     list->head = NULL;
++    list->len = 0;
+ 
+     while (current)
+     {
+@@ -361,6 +395,8 @@
+         temp = current;
+         current = current->next;
+         pool_free(temp);
++        mstat.sig_freed++;
++        mstat.in_use--;
+     }
+ }
+ 
+@@ -500,15 +536,18 @@
+         {
+             if (i == 0 && check_bit( 29, receive_message.shm_idx + i ))
+             {
++                mstat.unregs++;
+                 unregister_wait( &receive_message, tid, count );
+                 break;
+             }
++            if (i == 0) mstat.regs++;
+             is_mutex = check_bit( 28, receive_message.shm_idx + i );
+             obj = get_shm( receive_message.shm_idx[i] );
+             val = __atomic_load_n( &obj->low, __ATOMIC_SEQ_CST );
+             if ((is_mutex && (val == 0 || val == ~0 || val == tid)) || (!is_mutex && val != 0))
+             {
+                 if (i > 1) unregister_wait( &receive_message, tid, i );
++                mstat.early_wake++;
+                 wake_tid( tid );
+                 break;
+             }
