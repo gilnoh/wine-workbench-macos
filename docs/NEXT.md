@@ -253,11 +253,13 @@ Also noted, not chased: on the register path the server only unregisters already
     the AppDefaults key; ~242% CPU in a mission, 85% userspace; `dxmt-encode-thr`
     in `63R`; user reports graphics, sound and input fine; exit code 0. Its
     videos are Bink, so GStreamer is not on its path.
-  - **Not re-checked: Sekiro and Iron Nest.**
+  - **Sekiro and Iron Nest: re-checked, both play** (user report). Steam's
+    content_log dates the runs to 2026-10-10 20:09 (Sekiro) and 20:16 (Iron
+    Nest) — i.e. on the GStreamer rebuild with wine-0004 + wine-0007, **before
+    wine-0008** went in that evening. Neither has been run on the 0008 runtime.
 - **Rollback:** deleted 2026-10-10 (and so was the `.pre-0008` clone from the
-  Sea Power session). Sekiro and Iron Nest were still not re-checked at that
-  point; a regression there now means rebuilding without the suspect patch
-  rather than swapping a clone back.
+  Sea Power session). A regression now means rebuilding without the suspect
+  patch rather than swapping a clone back.
 - **`build-runtime` names its output `winecx-<ver>-x86_64`**; the `-sse` runtime
   needs `--name winecx-26.3.0-sse-x86_64`, which PROVENANCE does not record.
 - Tools run outside `gamerun` need `WINEMSYNC=1` (now in `RUNTIME.md` §6), and for
