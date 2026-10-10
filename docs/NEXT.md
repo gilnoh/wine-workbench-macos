@@ -67,8 +67,15 @@ without GC pressure).
   histograms. Showed Wine's Win32 answers were correct all along.
 - A C host that loads the game's `mono-2.0-bdwgc.dll` through the embedding API
   and runs a net472 library calling `File.Exists` from `Parallel.ForEach` — the
-  decisive one. Not in the repo yet (was in a session scratch dir); worth adding
-  under `tools/probes/` if this class comes up again.
+  decisive one. Not kept (it lived in a session scratch dir, deleted with the
+  .NET SDK it was built with). Rebuilding it: a net472 class library (`dotnet
+  build`, Microsoft.NETFramework.ReferenceAssemblies) plus a mingw C host that
+  `LoadLibrary`s the DLL and calls `mono_set_dirs`/`mono_set_assemblies_path`
+  (the game's `Managed` dir), `mono_jit_init_version("…","v4.0.30319")`,
+  `mono_domain_assembly_open`, `mono_runtime_invoke`. Worth adding under
+  `tools/probes/` if this class comes up again. Decompiling the game's C# needs
+  `ilspycmd` (`dotnet tool install -g ilspycmd`; run with
+  `DOTNET_ROLL_FORWARD=Major`).
 
 ### Also found, not fixed
 
@@ -247,9 +254,10 @@ Also noted, not chased: on the register path the server only unregisters already
     in `63R`; user reports graphics, sound and input fine; exit code 0. Its
     videos are Bink, so GStreamer is not on its path.
   - **Not re-checked: Sekiro and Iron Nest.**
-- **Rollback:** `runtimes/winecx-26.3.0-sse-x86_64.pre-gst` is an APFS clone of
-  the runtime from before the rebuild. Delete it once the games above are
-  re-checked.
+- **Rollback:** deleted 2026-10-10 (and so was the `.pre-0008` clone from the
+  Sea Power session). Sekiro and Iron Nest were still not re-checked at that
+  point; a regression there now means rebuilding without the suspect patch
+  rather than swapping a clone back.
 - **`build-runtime` names its output `winecx-<ver>-x86_64`**; the `-sse` runtime
   needs `--name winecx-26.3.0-sse-x86_64`, which PROVENANCE does not record.
 - Tools run outside `gamerun` need `WINEMSYNC=1` (now in `RUNTIME.md` §6), and for
