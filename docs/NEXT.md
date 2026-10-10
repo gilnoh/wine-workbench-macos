@@ -42,7 +42,7 @@ NullReferenceException 1 → 0).
    after the first failing one never spawns. That is also why the result varied
    from run to run.
 
-### The fix — `wine-0008` (class `fix`, CodeWeavers candidate)
+### The fix — `wine-0008` (class `fix`, reported to CodeWeavers 2026-10-11)
 
 Free slot 13 the way CrossOver already frees slot 12 for the PEB (`hook(localtime,
 my_localtime)` in `ntdll/unix/loader.c`): hook `gmtime()` to a `gmtime_r()`
@@ -239,7 +239,7 @@ Three independent counters agree: leaked nodes, registrations without an unregis
 
 **Cost, measured; cause OPEN.** `waitprobe` is slower with the fix in every one of 5 interleaved pairs (unpatched vs fixed, alternating so both see the same machine state): **8.1 µs vs 13.1 µs** mean per round trip, about +60%. Runs taken minutes apart vary by more than that (the same fixed build measured 9.6, then 11.6–14.6 µs), so only interleaved numbers are worth comparing. The cause is *not* established. One extra unregister message per contention return looks too small for it, and the stats build showed the fixed runtime making ~2× the server registrations for the same work (202 k vs 101 k), which suggests the fix changes how often waits reach the server at all. That is the next thing to explain, before any report to CodeWeavers. No slowdown was noticeable in the game. (An earlier "~30%" here compared non-interleaved runs and was wrong.)
 
-CrossOver.app's own `wineserver` carries the same message, and the code is CodeWeavers' msync, not upstream Wine. **This is a genuine report candidate for CodeWeavers**, with a minimal repro (`waitprobe`) and the numbers above. It has not been reported.
+CrossOver.app's own `wineserver` carries the same message, and the code is CodeWeavers' msync, not upstream Wine. **Reported to CodeWeavers 2026-10-11** (codeweavers.com/contact-us, Technical Support, both patches attached, together with wine-0008), with the cost question above stated as open.
 
 Also noted, not chased: on the register path the server only unregisters already-added objects `if (i > 1)`, so an object at index 1 found signaled leaves index 0's node behind. On that path the client's own `server_remove_wait` cleans up afterwards, so it is not a leak today. It looks like an off-by-one (`i > 0`) that only works because the client is thorough.
 

@@ -30,13 +30,14 @@ workaround    wine-0004-kernelbase-append-args-env.patch
 # until the 0x80000-node pool is exhausted ("msync: warn: node memory pool
 # exhausted", all cores busy). Measured with wine-0006 + tools/probes/waitprobe:
 # leaked nodes == registrations without unregister == contention returns.
-# Candidate to report to CodeWeavers.
+# Reported to CodeWeavers 2026-10-11 (contact form, with wine-0008).
 fix           wine-0007-msync-unregister-on-contention.patch
 # Sea Power, 2026-10-10: missions spawned no or few ships. On macOS %gs is the
 # pthread TSD, and Wine mirrors only Self/TLS/PEB into it; Unity's Mono reads
 # the last error from gs:[0x68] (TSD slot 13, libc's gmtime() key), got junk,
 # and File.Exists() then reported missing files as existing. Measured with the
-# game's own mono-2.0-bdwgc.dll hosted under Wine. Candidate for CodeWeavers.
+# game's own mono-2.0-bdwgc.dll hosted under Wine. Reported to CodeWeavers
+# 2026-10-11 (contact form, with wine-0007).
 fix           wine-0008-ntdll-mirror-last-error-into-macos-gs.patch
 debug         wine-0005-winemac-surface-flush-trace.patch
 # Fantasy General II, 2026-10-02: after long play, wineserver floods
