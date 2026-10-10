@@ -1,0 +1,164 @@
+From: Gil Noh <nohtaegil@gmail.com>
+Subject: [PATCH] ntdll: Mirror TEB->LastErrorValue into %gs:0x68 on macOS.
+
+On x86_64 macOS %gs does not point at the TEB but at the pthread TSD.
+Wine copies three TEB fields into it (Self at 0x30, the TLS pointer at
+0x58, the PEB at 0x60) so that PE code reading them through %gs works.
+LastErrorValue at 0x68 is not among them, so PE code that reads the last
+error straight from the TEB gets whatever libc keeps in TSD slot 13
+(__PTK_LIBC_GMTIME_KEY, gmtime()'s per-thread buffer).
+
+Unity's Mono (mono-2.0-bdwgc.dll) does exactly that: it contains 97
+"mov eax, gs:[0x68]" and uses them to capture the error of
+SetLastError=true P/Invokes. Hosting that runtime under Wine and calling
+GetFileAttributesExW on 400 paths whose directory does not exist:
+
+  GetLastError() read directly after the call    3 (PATH_NOT_FOUND), 400/400
+  Marshal.GetLastWin32Error() (via gs:[0x68])     14142976 (0xd7ce00), 400/400
+
+Unity's File.Exists() treats the unexpected code as "fall back to
+FindFirstFileExW" and then reports about 90% of such missing files as
+existing (6038 of 6684). Sea Power (Unity 6) probes a user directory
+before its data directory with File.Exists(), so it read ~2300 of its
+data files from paths that do not exist, loaded empty definitions, and a
+NullReferenceException in ship creation left missions without ships.
+
+Slot 13 is in use: libc's gmtime() keeps a buffer pointer there and
+Wine's own unix code calls gmtime() (ntdll/unix/system.c). So free the
+slot the way the PEB slot 12 (localtime()'s) is already freed, by
+hooking gmtime() to a gmtime_r() wrapper, initialise it per thread from
+the TEB, and keep it in sync wherever Wine sets the last error:
+
+  - the __WINESRC__ inline SetLastError() in winbase.h, which is how most
+    of Wine (kernelbase's set_ntstatus(), GetFileAttributesExW, ...) sets
+    it -- it writes the TEB directly, never calling into ntdll;
+  - PE RtlSetLastWin32Error/RtlSetLastWin32ErrorAndNtStatusFromNtStatus,
+    which kernel32/kernelbase export as SetLastError;
+  - the unix-side RtlSetLastWin32Error (macOS only).
+
+On Linux and the BSDs %gs is the TEB in both PE and unix code, so the
+extra store hits the same field; only macOS sees a difference.
+
+With this patch, same harness: Marshal.GetLastWin32Error() = 3 (400/400),
+File.Exists() true for missing files 0 of 6684 (also with four threads
+forcing ~250 GCs). A probe reading TEB+0x68 and gs:[0x68] after
+SetLastError() and failing GetFileAttributesExW/CreateFileW calls now sees
+them agree every time. In Sea Power the ships spawn again, and the game's
+own log shows 0 reads from nonexistent paths (2278 before).
+
+Mirroring only the Rtl* setters is not enough: Mono then read a stale code
+(2 where the TEB held 3) and File.Exists() still lied for 2513 files,
+because the winbase.h inline SetLastError() bypasses them.
+
+Against CrossOver 26.3.0 sources (Wine 11.0). LGPL-2.1-or-later.
+---
+diff --git a/dlls/ntdll/error.c b/dlls/ntdll/error.c
+index 5412b19..eadab49 100644
+--- a/dlls/ntdll/error.c
++++ b/dlls/ntdll/error.c
+@@ -107,6 +107,19 @@ DWORD WINAPI RtlGetLastWin32Error(void)
+     return NtCurrentTeb()->LastErrorValue;
+ }
+ 
++/* Code that reads the last error straight from the TEB through %gs (Unity's
++ * Mono does "mov eax, gs:[0x68]") gets it from wherever %gs points. On Linux
++ * that is the TEB, so this writes the same field again. On macOS %gs is the
++ * pthread TSD, which only mirrors a few TEB fields; keep LastErrorValue among
++ * them. The unix side frees that TSD slot (libc's gmtime() key) by hooking
++ * gmtime(), as it already does localtime() for the PEB slot. */
++static inline void mirror_last_error( DWORD err )
++{
++#if defined(__x86_64__) && !defined(__arm64ec__)
++    __asm__ volatile( "movl %0,%%gs:0x68" :: "r" (err) : "memory" );
++#endif
++}
++
+ /***********************************************************************
+  *      RtlSetLastWin32Error (NTDLL.@)
+  *      RtlRestoreLastWin32Error (NTDLL.@)
+@@ -122,6 +135,7 @@ DWORD WINAPI RtlGetLastWin32Error(void)
+ void WINAPI RtlSetLastWin32Error( DWORD err )
+ {
+     NtCurrentTeb()->LastErrorValue = err;
++    mirror_last_error( err );
+ }
+ 
+ /***********************************************************************
+@@ -138,4 +152,5 @@ void WINAPI RtlSetLastWin32Error( DWORD err )
+ void WINAPI RtlSetLastWin32ErrorAndNtStatusFromNtStatus( NTSTATUS status )
+ {
+     NtCurrentTeb()->LastErrorValue = RtlNtStatusToDosError( status );
++    mirror_last_error( NtCurrentTeb()->LastErrorValue );
+ }
+diff --git a/dlls/ntdll/unix/env.c b/dlls/ntdll/unix/env.c
+index 832adfc..f87e711 100644
+--- a/dlls/ntdll/unix/env.c
++++ b/dlls/ntdll/unix/env.c
+@@ -2442,4 +2442,9 @@ void WINAPI RtlSetLastWin32Error( DWORD err )
+     if (wow_teb) wow_teb->LastErrorValue = err;
+ #endif
+     teb->LastErrorValue = err;
++#if defined(__APPLE__) && defined(__x86_64__)
++    /* %gs is the pthread TSD on macOS; keep its LastErrorValue slot in sync
++     * for PE code that reads gs:[0x68] directly (see ntdll/error.c). */
++    __asm__ volatile( "movl %0,%%gs:%c1" :: "r" (err), "n" (FIELD_OFFSET(TEB, LastErrorValue)) : "memory" );
++#endif
+ }
+diff --git a/dlls/ntdll/unix/loader.c b/dlls/ntdll/unix/loader.c
+index 494e056..73732d4 100644
+--- a/dlls/ntdll/unix/loader.c
++++ b/dlls/ntdll/unix/loader.c
+@@ -2178,6 +2178,12 @@ struct tm *my_localtime(const time_t *timep)
+     return localtime_r(timep, &localtime_tls);
+ }
+ 
++static __thread struct tm gmtime_tls;
++struct tm *my_gmtime(const time_t *timep)
++{
++    return gmtime_r(timep, &gmtime_tls);
++}
++
+ static void hook(void *to_hook, const void *replace)
+ {
+     size_t offset;
+@@ -2241,6 +2247,9 @@ static void start_main_thread(void)
+     /* This is necessary because we poke PEB into pthread TLS at offset 0x60. It is normally in use by
+      * localtime(), which is called a lot by system libraries. Make localtime() go away. */
+     hook(localtime, my_localtime);
++    /* Likewise TEB->LastErrorValue at offset 0x68, which is gmtime()'s slot: PE code that reads
++     * gs:[0x68] directly (Unity's Mono) must see the last error, not libc's gmtime buffer. */
++    hook(gmtime, my_gmtime);
+ #endif
+ 
+     /* CW Hack 24067 */
+diff --git a/dlls/ntdll/unix/signal_x86_64.c b/dlls/ntdll/unix/signal_x86_64.c
+index 91926a8..4aafb6f 100644
+--- a/dlls/ntdll/unix/signal_x86_64.c
++++ b/dlls/ntdll/unix/signal_x86_64.c
+@@ -3076,6 +3076,9 @@ void init_syscall_frame( LPTHREAD_START_ROUTINE entry, void *arg, BOOL suspend,
+     __asm__ volatile ("movq %0,%%gs:%c1" :: "r" (teb->Tib.Self), "n" (FIELD_OFFSET(TEB, Tib.Self)));
+     __asm__ volatile ("movq %0,%%gs:%c1" :: "r" (teb->ThreadLocalStoragePointer), "n" (FIELD_OFFSET(TEB, ThreadLocalStoragePointer)));
+     __asm__ volatile ("movq %0,%%gs:%c1" :: "r" (teb->Peb), "n" (FIELD_OFFSET(TEB, Peb)));
++    /* LastErrorValue is kept in sync by RtlSetLastWin32Error(); start the slot (libc's gmtime()
++     * key, freed by hooking gmtime() in loader.c) from the TEB rather than a stale pointer. */
++    __asm__ volatile ("movq %0,%%gs:%c1" :: "r" ((ULONG_PTR)teb->LastErrorValue), "n" (FIELD_OFFSET(TEB, LastErrorValue)));
+     thread_data->pthread_teb = mac_thread_gsbase();
+     /* alloc_tls_slot() needs to poke a value to an address relative to each
+        thread's gsbase.  Have each thread record its gsbase pointer into its
+diff --git a/include/winbase.h b/include/winbase.h
+index 0213b40..fe94112 100644
+--- a/include/winbase.h
++++ b/include/winbase.h
+@@ -2701,6 +2701,12 @@ static FORCEINLINE HANDLE WINAPI GetProcessHeap(void)
+ static FORCEINLINE void WINAPI SetLastError( DWORD err )
+ {
+     *(DWORD *)((void **)NtCurrentTeb() + 13) = err;
++#if defined(__x86_64__) && !defined(__arm64ec__)
++    /* Mirror into %gs:0x68 for code that reads the last error straight from
++     * there. Same field where %gs is the TEB; on macOS %gs is the pthread TSD
++     * (see RtlSetLastWin32Error in dlls/ntdll/error.c). */
++    __asm__ volatile( "movl %0,%%gs:0x68" :: "r" (err) : "memory" );
++#endif
+ }
+ 
+ #else  /* __WINESRC__ */

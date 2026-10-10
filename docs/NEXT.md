@@ -9,6 +9,89 @@
 > **This file is the only one that tracks current state**, so it is where anything
 > time-varying belongs: what is working now, what is open, and what has been refuted.
 
+## Session 2026-10-10 — Sea Power plays; Wine-on-macOS lost the last error for gs:-readers
+
+**Sea Power: Naval Combat in the Missile Age** (Unity 6000.0.67f1, D3D11 on DXMT,
+appid 1286220, profile `sea-power.env`) installs and renders fine, but missions
+spawned ships incompletely or not at all — in the NATO scenario Gauntlet the two
+escort frigates were missing, on other runs every ship. Fixed by
+`patches/wine-0008`; verified in game (Gauntlet shows FFG-10 and FF-1091 with the
+freighters) and in the game's own session log (wrong-path reads 2278 → 0,
+NullReferenceException 1 → 0).
+
+### The chain, every link measured
+
+1. **Wine/CrossOver on x86_64 macOS:** `%gs` is the pthread TSD, not the TEB. The
+   base copies only Self (0x30), the TLS pointer (0x58) and the PEB (0x60) into it
+   (`init_syscall_frame`). `LastErrorValue` (0x68) is TSD slot 13, libc's
+   `gmtime()` key.
+2. **Unity's Mono** (`MonoBleedingEdge/EmbedRuntime/mono-2.0-bdwgc.dll`) has 97
+   `mov eax, gs:[0x68]` and uses them for `SetLastError=true` P/Invokes. Hosting
+   that DLL under our Wine: raw `GetLastError()` after a failed
+   `GetFileAttributesExW` = 3 (400/400); `Marshal.GetLastWin32Error()` = 0xd7ce00
+   (400/400).
+3. **Unity's `File.Exists`** (`System.IO.FileSystem.FillAttributeInfo` in the
+   game's mscorlib) treats that code as unexpected, falls back to
+   `FindFirstFileExW`, and ends up reporting missing files as existing: 6038 of
+   6684 under a directory that does not exist.
+4. **The game's `FileManager.GetFile`** checks `StreamingAssets/user/<rel>` with
+   `File.Exists` before the indexed `original/`, so ~2300 data files resolved to
+   nonexistent `user\…` paths (cached for the session), loaded empty, and ship
+   loading threw in `Noisemaker.disableHitBoxCollider` (the towed Nixie decoy has
+   no hitbox) — which kills the `SceneCreator.initShips` coroutine, so every ship
+   after the first failing one never spawns. That is also why the result varied
+   from run to run.
+
+### The fix — `wine-0008` (class `fix`, CodeWeavers candidate)
+
+Free slot 13 the way CrossOver already frees slot 12 for the PEB (`hook(localtime,
+my_localtime)` in `ntdll/unix/loader.c`): hook `gmtime()` to a `gmtime_r()`
+wrapper; initialise the slot per thread from the TEB; mirror every last-error
+write into `gs:0x68` — **the `__WINESRC__` inline `SetLastError()` in
+`include/winbase.h`** (how kernelbase and most of Wine set it, writing the TEB
+directly), PE `RtlSetLastWin32Error*`, and the unix-side `RtlSetLastWin32Error`.
+On Linux/BSD `%gs` is the TEB, so the store hits the same field.
+
+The first version mirrored only the `Rtl*` setters, and the harness showed it
+fixing nothing that mattered: Mono then read a *stale* code (2 where the TEB held
+3; false "exists" 6038 → 2513). `gsprobe` showed why — after a failed
+`GetFileAttributesExW` the TEB held 3 and `gs:0x68` still held the previous
+`SetLastError(1234)`. That is the winbase.h inline. With it: TEB and `gs:0x68`
+agree after every call, Mono reads 3 (400/400), false "exists" 0 (with and
+without GC pressure).
+
+### Reproducers (no game needed)
+
+- `tools/probes/existprobe.c` — Win32 `GetFileAttributes*` on missing/real
+  roots, N threads, with a .NET `FillAttributeInfo` emulation and error-code
+  histograms. Showed Wine's Win32 answers were correct all along.
+- A C host that loads the game's `mono-2.0-bdwgc.dll` through the embedding API
+  and runs a net472 library calling `File.Exists` from `Parallel.ForEach` — the
+  decisive one. Not in the repo yet (was in a session scratch dir); worth adding
+  under `tools/probes/` if this class comes up again.
+
+### Also found, not fixed
+
+- **On exit, `Vuplex WebView.vuplex` (the game's embedded Chromium) gets a winedbg
+  "Program Error" dialog** ("Couldn't get first exception"), and `Sea Power.exe`
+  then spins one thread at 100% instead of exiting. Seen with and without any
+  probing. The game terminates the browser process at shutdown
+  (`[3D WebView] TerminateBrowserProcess` in Player.log); inferred, not shown, that
+  Wine reports that termination as a crash. `bin/killwine --game-only` clears it.
+- `profiles/sea-power-direct.env` launches the exe directly (needs
+  `steam_appid.txt` in the game dir, now present) and can give the embedded
+  Chromium a DevTools port via `WINE_APPEND_ARGS`.
+- The game writes a verbose HTML session log to `Sea Power_Data/Logs/` whose level
+  is `[Debug] LogLevelDebug` in its usersettings.ini (0 = Off, 4 = Info, 6 =
+  DebugWarning). That log, not Player.log, is where its own errors go.
+
+### Do not re-chase (measured and refuted this session)
+
+- Windows locale / decimal separator (prefix is en-US, `.`); NTFS-vs-APFS
+  directory order (Wine returns sorted listings); a script-engine (Vuplex JS)
+  startup failure (it starts; the pipe carries every message both ways); Wine's
+  Win32 `GetFileAttributes*` being wrong under concurrency (1.1 M checks, 0 errors).
+
 ## Session 2026-10-01/02 — Fantasy General II plays; the runtime gains GStreamer
 
 **Fantasy General II** (Unity 2018.4, D3D11 on DXMT, appid 1025440) plays, with its
