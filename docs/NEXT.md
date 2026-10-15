@@ -60,6 +60,32 @@ fixing nothing that mattered: Mono then read a *stale* code (2 where the TEB hel
 agree after every call, Mono reads 3 (400/400), false "exists" 0 (with and
 without GC pressure).
 
+### Upstream Wine does not have this bug — it is CrossOver's divergence
+
+Checked 2026-10-15 against `src/wine` (upstream 11.14) and `src/wine-11.0`
+(CrossOver 26.3.0's base), by reading the source:
+
+- **Upstream switches GSBASE on macOS.** `_thread_set_tsd_base()` (Apple
+  private API) sets `%gs` to the TEB when entering PE code (syscall dispatcher
+  return path, `leave_handler`) and to the pthread TSD for unix code — 9 uses
+  in plain Wine 11.0 already. So in upstream PE code `gs:[0x68]` *is*
+  `LastErrorValue`, and Mono's direct read works.
+- **CrossOver 26.3.0 has 0 uses.** It keeps GSBASE on the pthread TSD and
+  copies Self/TLS/PEB into it (`init_syscall_frame`), plus the `localtime()`
+  hook for slot 12. That divergence is the root cause; no comment in their tree
+  says why (Rosetta is a plausible reason — not established).
+- Consequently wine-0008 is meaningful only against CrossOver's tree, and
+  wine-0007 likewise: upstream has no msync at all.
+- Not measured: Sea Power or the Mono harness on an upstream build. Upstream on
+  macOS has its own gaps for this game (D3D11 needs DXMT; Steam's window needs
+  wine-0004), so that check is not quick.
+
+**CodeWeavers' reply** (ticket #1572050, 2026-10-15): support passed both
+patches to the developers and suggested also sharing them with WineHQ and
+comparing against current upstream. Gil replied the same day with the
+comparison above — neither issue exists upstream as such, so the patches only
+apply to CrossOver's tree; reproducers offered on request.
+
 ### Reproducers (no game needed)
 
 - `tools/probes/existprobe.c` — Win32 `GetFileAttributes*` on missing/real
@@ -239,7 +265,7 @@ Three independent counters agree: leaked nodes, registrations without an unregis
 
 **Cost, measured; cause OPEN.** `waitprobe` is slower with the fix in every one of 5 interleaved pairs (unpatched vs fixed, alternating so both see the same machine state): **8.1 µs vs 13.1 µs** mean per round trip, about +60%. Runs taken minutes apart vary by more than that (the same fixed build measured 9.6, then 11.6–14.6 µs), so only interleaved numbers are worth comparing. The cause is *not* established. One extra unregister message per contention return looks too small for it, and the stats build showed the fixed runtime making ~2× the server registrations for the same work (202 k vs 101 k), which suggests the fix changes how often waits reach the server at all. That is the next thing to explain, before any report to CodeWeavers. No slowdown was noticeable in the game. (An earlier "~30%" here compared non-interleaved runs and was wrong.)
 
-CrossOver.app's own `wineserver` carries the same message, and the code is CodeWeavers' msync, not upstream Wine. **Reported to CodeWeavers 2026-10-11** (codeweavers.com/contact-us, Technical Support, both patches attached, together with wine-0008), with the cost question above stated as open.
+CrossOver.app's own `wineserver` carries the same message, and the code is CodeWeavers' msync, not upstream Wine. **Reported to CodeWeavers 2026-10-11** (codeweavers.com/contact-us, Technical Support, both patches attached, together with wine-0008), with the cost question above stated as open. Upstream Wine has no msync, so this is CrossOver-only (see the 2026-10-10 section, "Upstream Wine does not have this bug", for the ticket and CodeWeavers' reply).
 
 Also noted, not chased: on the register path the server only unregisters already-added objects `if (i > 1)`, so an object at index 1 found signaled leaves index 0's node behind. On that path the client's own `server_remove_wait` cleans up afterwards, so it is not a leak today. It looks like an off-by-one (`i > 0`) that only works because the client is thorough.
 
