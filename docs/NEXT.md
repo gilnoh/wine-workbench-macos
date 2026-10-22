@@ -9,6 +9,20 @@
 > **This file is the only one that tracks current state**, so it is where anything
 > time-varying belongs: what is working now, what is open, and what has been refuted.
 
+## Status 2026-10-22 — Silent Shark plays
+
+- **Silent Shark** (appid 4705650, Electron 35 / Chromium 134, ANGLE) **plays** — user report. Steam's content_log shows two Steam-launched runs on 2026-10-15 (19:26–19:30, 19:30–19:38), i.e. via `profiles/silent-shark.env` on `winecx-26.3.0-sse-x86_64` with wine-0004 + 0007 + 0008, `BACKEND="none"`. The worry recorded in the profile — Chromium's out-of-process GPU dropping its pixels, as with steamwebhelper — did not show up as a visible problem; how ANGLE actually rendered (D3D11 via wined3d, GL, or SwiftShader) was not measured. `profiles/silent-shark-direct.env` exists for experiments and has not been needed.
+- **Silent Shark's Chromium runs its GPU in-process because the game asks for it — not a CEF/Chromium decision.** Measured 2026-10-22 (direct launch, `--enable-logging=stderr --v=1 --remote-debugging-port=9222`, read back via CDP `SystemInfo.getInfo`): no `--type=gpu-process` ever appears; `auxAttributes.inProcessGpu = true`; the browser's in-process command line ends `--in-process-gpu --disable-direct-composition --gpu-preferences=…` although none was passed. Source: the bundled `steamworks.js` (`resources/app.asar.unpacked/node_modules/steamworks.js/index.js:56`), `electronEnableSteamOverlay()` → `app.commandLine.appendSwitch('in-process-gpu')` + `'disable-direct-composition'` — i.e. the Steam overlay needs the GPU in the window's process. So it is no contrast case for the open CEF question. Also measured: ANGLE's D3D11 init fails (RUNTIME.md §10), it falls back to D3D9Ex on wined3d (`glRenderer` "ANGLE (NVIDIA, NVIDIA GeForce 8800 GTX Direct3D9Ex …)"), `gpu_compositing: enabled`. A `strings` search of `app.asar` for `appendSwitch` found nothing; the call is in `app.asar.unpacked`.
+- **CLOSED — CrossOver's `--in-process-gpu` for Steam comes from a closed, encrypted compat database — not from CEF, not from Steam.** `wine-0004` is our open equivalent and stays; the question (item 5) is answered, not solved — nothing open in CrossOver to port. Measured 2026-10-22 in CrossOver.app 26.3, bottle `Steam`:
+  - A renamed `cmd.exe` launched by plain `cmd` in the bottle prints its own argv: as `notsteam.exe` → `ARGS-END`; as `steamwebhelper.exe` → `ARGS-END --no-sandbox --in-process-gpu --disable-gpu`; also with `--type=renderer` in the args (unlike our wine-0004, which skips `--type=` children). No Steam involved. Real steamwebhelper's argv ends with the same three switches.
+  - Mechanism: `dlls/ntdll/unix/loader.c` (public source) `dlopen`s `cxcompatdb.so` under `/* CW Hack 24067 */`. That library is **not** in the published source; its strings show an "append command line" hack type (`append`, `required_args`, `forbidden_args`, `insert`), plus "replace exe path", "add env vars" and an nvngx redirect, read from an encrypted, signature-checked JSON database at `~/Library/Application Support/CrossOver/compatdb-26.dat`. The switch strings occur nowhere in plain text in CrossOver.app, the bottle, its registry or Steam's own binaries (ASCII and UTF-16 searched); `steamclient64.dll`'s switch table has `--no-sandbox` and `--disable-gpu` but no `--in-process-gpu`.
+  - This supersedes the "Do not re-chase" entry *"steam.exe appends `--in-process-gpu` — impossible; CEF appends it in-process"*: CEF does not append it either. It also explains why every earlier search came back empty.
+  - **Side finding:** the documented hack grep `grep -rn 'CW HACK\|CX HACK'` is case-sensitive and finds 119 markers; `grep -rni` finds 199. The documented grep misses 80 markers, this `CW Hack 24067` among them. Fixed to `-rni` in `CLAUDE.md` and `AGENT_START_HERE.md`.
+  - **Consequence for every "CrossOver works, we don't" comparison:** the source tree is not the whole of CrossOver's behaviour. Before concluding "nothing in their source does X", account for `cxcompatdb.so` rules (per-exe argument appends, exe-path replacement, extra env vars, DLL redirects), which no grep of the tree or the app bundle can see.
+- **Silent Shark, direct launch with DevTools: menu white and unusable, sound normal** (user report, 2026-10-22). Cause not established — candidates are the direct launch itself, `--remote-debugging-port`, or a failed CDP `Target.createTarget` sent to it. The Steam launch of 2026-10-15 rendered normally.
+- **Rollback copies: not needed** (Gil, 2026-10-22). A regression is handled by rebuilding without the suspect patch; no clone is kept.
+- **Sekiro and Iron Nest play on wine-0008** — user report, runs in Steam's content_log 2026-10-22 21:49–21:58 (Sekiro) and 21:58–22:38 (Iron Nest), `winecx-26.3.0-sse-x86_64` built 2026-10-10 21:48Z with wine-0004 + 0007 + 0008. Before this, neither had run on the 0008 runtime.
+
 ## Session 2026-10-10 — Sea Power plays; Wine-on-macOS lost the last error for gs:-readers
 
 **Sea Power: Naval Combat in the Missile Age** (Unity 6000.0.67f1, D3D11 on DXMT,
@@ -285,7 +299,7 @@ Also noted, not chased: on the register path the server only unregisters already
     wine-0008** went in that evening. Neither has been run on the 0008 runtime.
 - **Rollback:** deleted 2026-10-10 (and so was the `.pre-0008` clone from the
   Sea Power session). A regression now means rebuilding without the suspect
-  patch rather than swapping a clone back.
+  patch rather than swapping a clone back. Not wanted back (Gil, 2026-10-22).
 - **`build-runtime` names its output `winecx-<ver>-x86_64`**; the `-sse` runtime
   needs `--name winecx-26.3.0-sse-x86_64`, which PROVENANCE does not record.
 - Tools run outside `gamerun` need `WINEMSYNC=1` (now in `RUNTIME.md` §6), and for
@@ -789,8 +803,10 @@ texture-view sampling, which forced post-processing off).
 - **clang as the PE compiler** — the better long-term toolchain (CrossOver's and
   upstream's choice; brings `-fms-hotpatch`), blocked on a Steam-login regression:
   `EConnect` retried every 50 ms with zero TLS errors. Rebuild that runtime to debug it.
-- **Why CEF runs its GPU in-process under CrossOver and not for us** — reopened; see
-  `RUNTIME.md` §2. Closing it would delete `wine-0004` and leave zero functional patches.
+- ~~**Why CEF runs its GPU in-process under CrossOver and not for us**~~ — **answered
+  2026-10-22**: it doesn't decide anything. CrossOver's closed `cxcompatdb.so` appends
+  the switches from an encrypted rule database (see the 2026-10-22 status at the top and
+  `RUNTIME.md` §2). `wine-0004` is our open equivalent and stays.
 - **Installing Steam into a prefix is still manual**, as is registering `S:` in the
   client. `bin/mkprefix` itself now runs end to end (verified 2026-08-01).
 
@@ -1730,6 +1746,10 @@ rule that used to be repeated here is superseded by the two paragraphs above.)
 ## Open questions
 
 - ~~**Why does CEF add `--in-process-gpu` under CrossOver and not for us?**~~
+  **Answered 2026-10-22: CEF doesn't — CrossOver's closed `cxcompatdb.so` appends it
+  (`CW Hack 24067`, encrypted rule database; see the 2026-10-22 status at the top).**
+  The 2026-07-30 "closure" below was itself wrong: `RUNTIME.md` §2 measured that
+  `CX HACK 23950` does not cover Steam. Kept for the record:
   **This was the wrong question — closed 2026-07-30.** CEF's decision logic never
   mattered. CrossOver does not need the switch because `CX HACK 23950` gives
   foreign-parent windows a shared-memory surface flushed to the owning process, so
@@ -1964,8 +1984,10 @@ right call there.
   `-cef-disable-seccomp-sandbox`, `-cef-force-accessibility`, `-cef-force-gpu`,
   `-no-cef-sandbox`. (`-noreactlogin` and `-cef-force-32bit` from old forum
   threads are absent too.)
-- *"steam.exe appends `--in-process-gpu`"* — impossible; the string exists only
-  in `libcef.dll`. CEF appends it to its own command line in-process.
+- *"steam.exe appends `--in-process-gpu`"* — correct that Steam doesn't (the
+  string is absent from all Steam binaries but `libcef.dll`). **But CEF doesn't
+  either** — this entry used to say so, and was wrong. CrossOver's closed
+  `cxcompatdb.so` appends it at process creation (measured 2026-10-22).
 - *"Steam persists the GPU-off decision"* — no. CrossOver's bottle has never
   logged `Disabling GPU` and never spawned a `--type=gpu-process`.
 - *"Shim `steamwebhelper.exe` to force the flag"* — Steam self-heals its

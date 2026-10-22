@@ -27,9 +27,12 @@ Treat the second as the first plus a method. The environment is identical.
   upstream for purity — the point is to be adoptable by the people who ship Wine on
   macOS.
 - **Before deriving a fix, check whether the base already has it.**
-  `grep -rn 'CW HACK\|CX HACK' src/crossover/sources/wine/` lists CodeWeavers'
+  `grep -rni 'CW HACK\|CX HACK' src/crossover/sources/wine/` lists CodeWeavers'
   intentional divergences. Re-deriving one of their fixes is wasted work and has
-  happened here more than once.
+  happened here more than once. Use `-i`: about 40% of the markers are spelled
+  `CW Hack`/`CX Hack`. And the tree is not all of CrossOver: the closed
+  `cxcompatdb.so` applies per-exe rules (argument appends, env vars, exe-path and
+  DLL redirects) from an encrypted database that no grep can see (`RUNTIME.md` §2, §7).
 - **`src/` is reference material, not build output.** It is gitignored, which makes it
   look disposable. It holds the vendor Wine trees, and several answers came from diffing
   them.
@@ -261,7 +264,7 @@ major contributors, so what they know upstream effectively knows.
 Before proposing to report anything, check whether CrossOver already handles it:
 
 ```sh
-grep -rn 'CW HACK\|CX HACK' src/crossover/sources/wine/
+grep -rni 'CW HACK\|CX HACK' src/crossover/sources/wine/
 ```
 
 If they carry a hack for it, or deliberately took another path, **there is nothing to

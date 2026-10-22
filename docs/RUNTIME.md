@@ -191,10 +191,16 @@ This is **not a GPU problem**. It happens with the GPU fully disabled, because
 the fault is the process boundary, not the renderer.
 
 `--in-process-gpu` makes viz a *thread* of the browser process, so the blit
-lands in the real surface. CEF appends that switch itself under CrossOver and
-never for us; the trigger is still unknown (see "Open questions"). Steam
-restores its own binaries on launch, so a shim executable cannot survive —
-the switch is injected through Wine instead:
+lands in the real surface. **CrossOver does exactly the same thing, in closed
+form**: its `cxcompatdb.so` (loaded by `ntdll/unix/loader.c` under `CW Hack
+24067`, not itself in the published source) reads an encrypted, signed rule
+database (`~/Library/Application Support/CrossOver/compatdb-26.dat`) and
+appends `--no-sandbox --in-process-gpu --disable-gpu` to every process whose
+image is `steamwebhelper.exe` — including `--type=` children. Measured
+2026-10-22 with a renamed `cmd.exe` printing its own argv in their bottle;
+neither CEF nor Steam is involved. Steam restores its own binaries on launch,
+so a shim executable cannot survive — the switch is injected through Wine
+instead:
 
 ```
 patches/wine-0004-kernelbase-append-args-env.patch
@@ -238,12 +244,11 @@ foreign **parent**, while Steam's black window comes from a foreign **painter** 
 the window is owned by the browser process and drawn into by the viz/GPU process.
 Different shapes; only the first is covered.
 
-**So `wine-0004` stays**, now as one of our own deltas rather than a stopgap awaiting
-23950. And the question this section declared closed is **open again**: why does CEF
-run its GPU in-process under CrossOver (their bottle never spawns a
-`--type=gpu-process`) and out-of-process for us? The flag, not the surface, is the
-difference — so reading `libcef.dll` around its `in-process-gpu` string is still the
-honest next step.
+**So `wine-0004` stays**, as the open equivalent of CrossOver's closed
+`cxcompatdb.so` rule (above). The flag, not the surface, is the difference
+between their bottle and ours — and they set it the same way we do, at process
+creation, by image name. There is nothing open to port; `wine-0004` goes away
+only if Wine learns cross-process window drawing.
 
 A better renderer would **not** help, and this is settled rather than assumed:
 `winemac.drv/opengl.c` carries the same per-process gate and states it outright —
@@ -526,30 +531,21 @@ theories; the refuted list in `NEXT.md` exists so they are not chased twice.
 
 ## 7. Open questions
 
-- **Why does CEF add `--in-process-gpu` for CrossOver and not for us?** Their
-  Wine source contains zero occurrences of the switch, so CEF decides it from
-  something it probes. Ruled out: bundled MoltenVK, the Apple GPTK hook, bottle
-  registry, environment variables, D3DMetal DLLs (not loaded), the AMD GPU
-  identity spoof, and `wined3d`'s Vulkan renderer.
+- ~~**Why does CEF add `--in-process-gpu` for CrossOver and not for us?**~~
+  **Answered 2026-10-22: it doesn't.** CrossOver's closed `cxcompatdb.so` appends
+  the switch from an encrypted rule database (§2). Every probe of CEF's own logic
+  (bundled MoltenVK, the GPTK hook, registry, environment, D3DMetal, the AMD
+  identity spoof, wined3d's Vulkan renderer, Chromium's GPU blocklist) was
+  correctly negative, because CEF was never the decider.
 
-  **Chromium's GPU blocklist is not the mechanism either.** With
-  `--vmodule=gpu_control_list*=3` Chromium names every rule it matches:
+  General lesson: CrossOver's behaviour is its published source **plus**
+  `cxcompatdb.so` rules — per-exe argument appends, exe-path replacement, extra
+  environment variables, DLL redirects — which no grep of the tree or the app
+  bundle can see. When CrossOver behaves differently for one program, test for a
+  rule (rename the exe, compare argv/env) before reading the program's internals.
 
-  | reported GPU identity | matched `gpu_blocklist` rules |
-  | --------------------- | ----------------------------- |
-  | Apple `0x106b` (ours) | 59, 90, 91, 122, 142, 164, 175, 182 |
-  | AMD `0x1002/0x66af` (CrossOver's identity, spoofed onto ours) | 122, 124, 139, 144, 166, 167 |
-
-  The sets differ, but **neither disables the GPU** — Chromium keeps it and
-  spawns a GPU process in both cases, and the window is black either way
-  (confirmed visually, not just from logs). So the AMD identity, which looked
-  like the strongest lead for a long time, is definitively not the cause.
-
-  That flag combination is the way to get observability here; it is worth
-  reaching for first if this is picked up again. What remains unexplained is
-  CEF's own decision logic, and the honest next step is probably reading
-  `libcef.dll` around its `in-process-gpu` string rather than more black-box
-  probing.
+  Still useful for Chromium GPU questions: `--vmodule=gpu_control_list*=3` names
+  every blocklist rule Chromium matches.
 - **Why does our build of CrossOver's own published source not behave like
   their shipped binaries?** Same tree, but GPU identification falls back to a
   dummy card. Their build configuration or bundled dependencies differ in a way
