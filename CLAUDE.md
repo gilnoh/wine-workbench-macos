@@ -18,7 +18,7 @@ and the "do not re-chase these" list of measured dead ends. `README.md`,
   build too broken to reach the code path, and a command-line flag that silently did
   nothing.
 - **Check the base before writing a patch.**
-  `grep -rni 'CW HACK\|CX HACK' src/crossover/sources/wine/` — re-deriving a fix
+  `grep -rniE 'C[WX] ?HACK|CrossOver Hack' src/crossover/sources/wine/` — re-deriving a fix
   CodeWeavers already wrote is the specific waste this project was restructured to avoid.
 - **Never edit the vendor source tree without a patch file in `patches/series`.**
   `bin/build-runtime` asserts the tree differs from its tag only by the series, and will
