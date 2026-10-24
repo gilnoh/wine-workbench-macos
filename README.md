@@ -3,6 +3,8 @@
 **Play your favourite Windows games on a Mac — and hack on the thing that runs them
 while you do.**
 
+> **Just want to play, in CrossOver?** [`CROSSOVER.md`](CROSSOVER.md) has drop-in fixes you can install into CrossOver.app and remove again — currently for *Sea Power* on CrossOver 26.3.0.
+
 This is not a launcher. There are good launchers already. This is a *workbench*: a
 reproducible Wine build, a patch series, and a set of measurement tools, arranged so that
 when a game misbehaves you can go all the way down — trace it, diff it against a

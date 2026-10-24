@@ -1,0 +1,142 @@
+#!/bin/bash
+# Package our fixes as drop-in files for an installed CrossOver.app.
+#
+#   bin/build-crossover-dropin --crossover /path/to/unmodified/CrossOver.app
+#                              [--runtime NAME] [--release N] [--no-strip]
+#
+# Output: build/crossover-dropin/<name>/ and <name>.zip, where <name> is
+# wine-workbench-crossover-<cxver>-dropin-<N>. The zip is what a player downloads:
+# the replacement files, install.command / restore.command, README.md (a copy of
+# CROSSOVER.md), a MANIFEST the scripts verify against, SHA256SUMS and a NOTICE.
+#
+# --crossover must point at an UNMODIFIED CrossOver.app of the exact version the
+# runtime was built from. Its files are the "original" side of the MANIFEST, and
+# install.command refuses to touch a file that matches neither side -- so a
+# MANIFEST taken from an already-patched app would make the installer accept it
+# as original and the restore script "restore" our own file.
+#
+# Three files, measured on Sea Power (docs/NOTEBOOK.md, 2026-10-24):
+#   x86_64-unix/ntdll.so          wine-0007, wine-0008 (unix side)
+#   x86_64-windows/ntdll.dll      wine-0008 (PE side)
+#   x86_64-windows/kernelbase.dll wine-0008's inline SetLastError mirror; without
+#                                 it Sea Power still fails, just differently
+# ntdll.so also gets every rpath CrossOver's own ntdll.so carries. Ours has only
+# @loader_path/; without CrossOver's @loader_path/../../../lib64, cxcompatdb.so
+# cannot find libgnutls, CrossOver's compat rules silently stop applying, and
+# Steam's window goes black.
+set -eo pipefail
+
+source "$(dirname "$0")/common.sh"
+
+FILES="x86_64-unix/ntdll.so x86_64-windows/ntdll.dll x86_64-windows/kernelbase.dll"
+
+RUNTIME="$DEFAULT_RUNTIME"
+CXAPP=""
+RELEASE=1
+STRIP=1
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --crossover) CXAPP="$2"; shift 2 ;;
+        --runtime)   RUNTIME="$2"; shift 2 ;;
+        --release)   RELEASE="$2"; shift 2 ;;
+        --no-strip)  STRIP=0; shift ;;
+        *) die "unknown argument: $1" ;;
+    esac
+done
+[ -n "$CXAPP" ] || die "--crossover /path/to/unmodified/CrossOver.app is required"
+
+RT="$RUNTIMES_DIR/$RUNTIME"
+PROV="$RT/PROVENANCE"
+CXLIB="$CXAPP/Contents/SharedSupport/CrossOver/lib/wine"
+[ -f "$PROV" ] || die "no PROVENANCE for runtime $RUNTIME"
+[ -d "$CXLIB" ] || die "not a CrossOver.app: $CXAPP"
+
+# The runtime must be built from the same CrossOver source version as the app.
+CXBUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$CXAPP/Contents/Info.plist")
+CXVER=$(sed -n 's/^crossover_version: *//p' "$PROV")
+case "$CXBUILD" in
+    "$CXVER".*) ;;
+    *) die "runtime $RUNTIME is CrossOver $CXVER source, but $CXAPP is build $CXBUILD" ;;
+esac
+PATCHES=$(sed -n 's/^patches: *//p' "$PROV")
+
+NAME="wine-workbench-crossover-$CXVER-dropin-$RELEASE"
+OUT="$GAMES_ROOT/build/crossover-dropin/$NAME"
+rm -rf "$OUT" "$OUT.zip"
+mkdir -p "$OUT/files/x86_64-unix" "$OUT/files/x86_64-windows"
+info "building $NAME from $RUNTIME against CrossOver $CXBUILD"
+
+for f in $FILES; do
+    cp "$RT/lib/wine/$f" "$OUT/files/$f"
+done
+
+# rpaths: add whatever CrossOver's ntdll.so has that ours lacks.
+rpaths() { otool -l "$1" | awk '/cmd LC_RPATH/{r=1} r && /path /{print $2; r=0}'; }
+ours=$(rpaths "$OUT/files/x86_64-unix/ntdll.so")
+for p in $(rpaths "$CXLIB/x86_64-unix/ntdll.so"); do
+    if ! printf '%s\n' "$ours" | grep -qxF "$p"; then
+        install_name_tool -add_rpath "$p" "$OUT/files/x86_64-unix/ntdll.so"
+        info "ntdll.so: added rpath $p"
+    fi
+done
+
+# Every symbol CrossOver's other unix modules import from ntdll.so must exist in
+# ours, or those modules fail to load. Measured equal for 26.3.0; checked anyway.
+syms() { nm -gU "$1" | awk '{print $NF}' | sort -u; }
+needed=$(for so in "$CXLIB"/x86_64-unix/*.so; do
+             [ "${so##*/}" = ntdll.so ] && continue
+             nm -u "$so" 2>/dev/null | awk '{print $NF}'
+         done | sort -u | comm -12 - <(syms "$CXLIB/x86_64-unix/ntdll.so"))
+missing=$(comm -23 <(printf '%s\n' "$needed") <(syms "$OUT/files/x86_64-unix/ntdll.so"))
+[ -z "$missing" ] || die "our ntdll.so lacks symbols CrossOver's modules import: $missing"
+
+# Our PE DLLs carry DWARF debug info (several MB); CrossOver's do not.
+# strip writes the current time into the PE header's TimeDateStamp (and so the
+# CheckSum) unless SOURCE_DATE_EPOCH is set -- measured: two builds differed in
+# exactly those 4 bytes. Pin it to the DLL's own stamp so a rebuild is
+# byte-identical to what was tested and the date stays the real build date.
+if [ "$STRIP" = 1 ]; then
+    command -v x86_64-w64-mingw32-strip >/dev/null || die "x86_64-w64-mingw32-strip not found (or use --no-strip)"
+    for f in x86_64-windows/ntdll.dll x86_64-windows/kernelbase.dll; do
+        pe=$(od -An -t u4 -j 60 -N 4 "$OUT/files/$f" | tr -d ' ')
+        stamp=$(od -An -t u4 -j $((pe + 8)) -N 4 "$OUT/files/$f" | tr -d ' ')
+        SOURCE_DATE_EPOCH="$stamp" x86_64-w64-mingw32-strip --strip-debug "$OUT/files/$f"
+    done
+fi
+
+sha() { shasum -a 256 "$1" | cut -d' ' -f1; }
+{
+    echo "# wine-workbench drop-in for CrossOver. Read by install.command and restore.command."
+    echo "name=$NAME"
+    echo "crossover_build=$CXBUILD"
+    echo "# file <path under CrossOver.app/Contents/SharedSupport/CrossOver/lib/wine> <original sha256> <replacement sha256>"
+    for f in $FILES; do
+        echo "file $f $(sha "$CXLIB/$f") $(sha "$OUT/files/$f")"
+    done
+} > "$OUT/MANIFEST"
+
+TOOLS="$GAMES_ROOT/tools/crossover-dropin"
+cp "$TOOLS/install.command" "$TOOLS/restore.command" "$OUT/"
+# One source for the player instructions: the repo's CROSSOVER.md, also online.
+cp "$GAMES_ROOT/CROSSOVER.md" "$OUT/README.md"
+chmod 755 "$OUT/install.command" "$OUT/restore.command"
+
+COMMIT=$(git -C "$GAMES_ROOT" rev-parse --short HEAD)
+cat > "$OUT/NOTICE.txt" <<EOF
+These files are a modified build of Wine, licensed under the GNU Lesser General Public License, version 2.1 or later (LGPL-2.1-or-later). They are not made, endorsed or supported by CodeWeavers. CrossOver is a trademark of CodeWeavers.
+
+Built from:
+- CodeWeavers' published CrossOver $CXVER source (crossover-sources-$CXVER.tar.gz), unmodified, as tag winecx-$CXVER in https://github.com/gilnoh/winecx-sources
+- plus these patches from https://github.com/gilnoh/wine-workbench-macos (commit $COMMIT, directory patches/): $PATCHES
+- built by bin/build-runtime ($RUNTIME), packaged by bin/build-crossover-dropin
+
+wine-0004 only acts when the WINE_APPEND_ARGS environment variable is set, which CrossOver does not do.
+EOF
+
+( cd "$OUT" && find . -type f ! -name SHA256SUMS | sed 's|^\./||' | sort | xargs shasum -a 256 > SHA256SUMS )
+( cd "$(dirname "$OUT")" && zip -qr -X "$NAME.zip" "$NAME" )
+
+info "done: ${OUT#$GAMES_ROOT/}.zip"
+for f in $FILES; do
+    printf '    %-30s %8s bytes (CrossOver: %s)\n' "$f" "$(stat -f%z "$OUT/files/$f")" "$(stat -f%z "$CXLIB/$f")"
+done
