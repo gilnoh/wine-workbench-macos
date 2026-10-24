@@ -12,7 +12,9 @@ This is unofficial. It is not made, endorsed or supported by CodeWeavers. If som
 
 **Why it happens.** Wine on macOS does not keep a copy of the "last error" value where the game's runtime (Unity's Mono) reads it. The game then takes data files that do not exist for files that do, and loads nothing from them.
 
-**Also included:** a fix for a Wine leak in long sessions, where the game eventually freezes with all CPU cores busy (seen in *Fantasy General II*; the Wine log then says `msync: warn: node memory pool exhausted`). It applies when the bottle has CrossOver's MSync setting on. Tested inside CrossOver 26.3 with a stress test of the waiting pattern that leaks: with CrossOver's own files the pool ran out after about a minute; with these files 40 million rounds ran to the end without it.
+**Status of the CrossOver-side fix:** [#1](https://github.com/gilnoh/wine-workbench-macos/issues/1)
+
+**Also included:** a fix for a Wine leak in long sessions, where the game eventually freezes with all CPU cores busy (seen in *Fantasy General II*; the Wine log then says `msync: warn: node memory pool exhausted`). It applies when the bottle has CrossOver's MSync setting on. Tested inside CrossOver 26.3 with a stress test of the waiting pattern that leaks: with CrossOver's own files the pool ran out after about a minute; with these files 40 million rounds ran to the end without it. Status of the CrossOver-side fix: [#2](https://github.com/gilnoh/wine-workbench-macos/issues/2)
 
 **Requirements.** CrossOver 26.3.0 exactly. The install script checks the exact build and stops without changing anything if it does not match. Tested on an Apple Silicon Mac.
 
