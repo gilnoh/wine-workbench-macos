@@ -217,7 +217,7 @@ The method that has produced every real finding here:
   Prefer (1). It is the only one that also makes the code say what it means.
 
   That bug is worth stating precisely, because the precise version is worse: `bin/mkprefix`
-  never worked at all. The Mono step arrived with the script in `c8efc2e` (2026-07-30), the
+  never worked at all. The Mono step arrived with the script in `a88045d` (2026-07-30), the
   repo's first commit is 2026-07-29, and the fault was found on 2026-08-01 — so it was
   broken from the day it was written and nobody had run it end to end in between.
 - **Isolate one variable.** When a build behaves differently, change one thing and

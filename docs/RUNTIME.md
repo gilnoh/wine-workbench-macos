@@ -424,7 +424,7 @@ the chain is source → runtime → prefix, each link checkable.
 project keeps meeting: `ln -sfn` to a missing target succeeds, `ls -l` on the
 result exits 0 and prints a normal-looking line, and only dereferencing fails.
 
-⚠️ **Correcting an earlier claim of ours** (commit `de7ed14`) that
+⚠️ **Correcting an earlier claim of ours** (commit `10ffa03`) that
 `wine cmd /c dir S:\` is "the meaningful check". It discriminates, but it does
 **not** fail loudly, and the difference matters. Measured on WineCX 26.3.0:
 
