@@ -21,6 +21,8 @@
 #   existprobe whether a file is reported as existing under a root whose
 #              directories do not exist, with N threads at once (and a real
 #              root as the control) -- Sea Power's ini preloader, 2026-10-10
+#   gsprobe    whether gs:0x68 holds the thread's last error, as code that reads
+#              it directly (Unity's Mono) expects -- the wine-0008 check
 #
 # Run xinputprobe and dinputprobe as a pair. A pad can be perfect on one API and
 # absent on the other, because winexinput.sys splits an XInput-capable gamepad
@@ -64,5 +66,6 @@ CC32=${CC32:-/opt/homebrew/bin/i686-w64-mingw32-gcc}
 "$CC"   -O1 -municode -o imgprobe64.exe imgprobe.c -lgdiplus
 "$CC"   -O1 -mconsole -o waitprobe.exe waitprobe.c
 "$CC"   -O1 -mconsole -o existprobe.exe existprobe.c
+"$CC"   -O1 -mconsole -o gsprobe.exe gsprobe.c
 
-echo "built: vkprobe.exe dwprobe.exe dxgiprobe.exe xinputprobe.exe dinputprobe.exe sdlopen mfprobe.exe oggprobe32.exe imgprobe32.exe imgprobe64.exe waitprobe.exe existprobe.exe"
+echo "built: vkprobe.exe dwprobe.exe dxgiprobe.exe xinputprobe.exe dinputprobe.exe sdlopen mfprobe.exe oggprobe32.exe imgprobe32.exe imgprobe64.exe waitprobe.exe existprobe.exe gsprobe.exe"
