@@ -2,7 +2,7 @@
 
 How to rebuild this environment on a clean machine, and — more importantly —
 *why* each deviation from stock exists. `PROJECT.md` holds design and decisions;
-`NEXT.md` holds what to do next; this file holds the runtime itself.
+`NOTEBOOK.md` holds what to do next; this file holds the runtime itself.
 
 Everything here was measured, not assumed. Where a belief turned out to be
 wrong, the correction is recorded rather than quietly dropped, because the wrong
@@ -154,7 +154,7 @@ is_gamepad 1`), named from SDL's controller DB, split by `winexinput.sys` into
 analogue triggers), on **DirectInput** (`DI8DEVTYPE_GAMEPAD`, POV hat, 941 state
 changes in 20 s) and for **rumble**. `tools/probes/xinputprobe.c` and
 `dinputprobe.c` repeat it. Note that `joy.cpl`'s DInput list is empty for such a
-pad *by design* — see `NEXT.md`.
+pad *by design* — see `NOTEBOOK.md`.
 
 **The generalisation is the part worth keeping:** a bundled library's identity is
 what it *is*, not what it is *called*, and a soname is not evidence. This bundle
@@ -525,7 +525,7 @@ Two `winedbg` traps found the same day:
 **Method note.** Every genuine finding this project has produced came from
 comparing against a working reference or measuring directly. Inferring causes
 from an application's error messages produced a string of confident, wrong
-theories; the refuted list in `NEXT.md` exists so they are not chased twice.
+theories; the refuted list in `NOTEBOOK.md` exists so they are not chased twice.
 
 ---
 
@@ -731,7 +731,7 @@ genuinely working — a game 33 s into loading showed `13.9%` while having burne
 
 **Measured 2026-08-14, on WineCX 26.3.0 with Iron Nest (Unity 6, D3D11).** This
 is a property of the platform, not of a game or of our build, so it belongs
-here rather than in `NEXT.md`.
+here rather than in `NOTEBOOK.md`.
 
 wined3d does select the Vulkan renderer on macOS — that is CodeWeavers'
 `CW HACK 18311` in `dlls/wined3d/directx.c:3531`, which tries

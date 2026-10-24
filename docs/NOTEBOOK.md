@@ -1,13 +1,10 @@
-# Continue here
+# Notebook
 
-> **New session?** Read `README.md` for what this project is, then
-> `AGENT_START_HERE.md` for how to operate it, then **`RUNTIME.md` — §9 and §10
-> in particular**. Those two sections encode a rule that is invisible until it
-> bites and then costs a session: wined3d cannot do D3D11 on this platform at
-> all, and `BACKEND=` in a profile does not reach a Steam-launched game. All
-> three files are durable and do not change.
-> **This file is the only one that tracks current state**, so it is where anything
-> time-varying belongs: what is working now, what is open, and what has been refuted.
+> Gil's working notebook for this workbench, kept together with AI agents (mostly Claude). Entries are dated and were written during the investigation, so an older section records what was believed at the time; where a later entry corrects an earlier one, the later one stands. "(Gil, date)" marks a decision Gil made; "user report" means something Gil saw or heard rather than something measured.
+>
+> It is also the only file that tracks current state: what works now, what is open, and the measured dead ends under "Do not re-chase these". Read that list before chasing a bug, whether you are a person or an agent.
+>
+> **New here?** Read `README.md` for what this project is, then `AGENT_START_HERE.md` for how to operate it, then **`RUNTIME.md` — §9 and §10 in particular**. Those two sections encode a rule that is invisible until it bites and then costs a session: wined3d cannot do D3D11 on this platform at all, and `BACKEND=` in a profile does not reach a Steam-launched game. Those three files are durable; anything time-varying belongs here.
 
 ## Status 2026-10-22 — Silent Shark plays
 

@@ -4,7 +4,7 @@
 runtime, make prefixes, run games, patch Wine, measure results, and where to record
 findings. This file is only the short version.
 
-`docs/NEXT.md` is the **only** file that tracks current state — what works, what is open,
+`docs/NOTEBOOK.md` is the **only** file that tracks current state — what works, what is open,
 and the "do not re-chase these" list of measured dead ends. `README.md`,
 `AGENT_START_HERE.md` and `docs/RUNTIME.md` are durable and should not accumulate status.
 

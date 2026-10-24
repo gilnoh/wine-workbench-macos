@@ -21,7 +21,7 @@
 # dead. These two are referenced by nothing and are both live:
 #   toolchains/            the locally built LLVM used as the PE compiler
 #                          (llvm-project, llvm-build, llvm, venv-meson -- 2.3 GB).
-#                          See docs/NEXT.md on clang as the PE toolchain.
+#                          See docs/NOTEBOOK.md on clang as the PE toolchain.
 #   patches/winemac-backup/  saved winemac.drv trees from the surface work.
 /toolchains/
 /patches/winemac-backup/

@@ -100,7 +100,7 @@ build/               build trees and logs
 | --- | --- |
 | **`AGENT_START_HERE.md`** | how to operate this repo, in two modes: set it up so games run, and set it up so you can fix things. Written for an AI agent; equally usable by a human. |
 | **`docs/RUNTIME.md`** | what this environment changes from stock Wine, and *why*. The most reusable document here — the platform findings live in it, and they apply to anyone building Wine on macOS, whether or not they use this tooling. |
-| **`docs/NEXT.md`** | the only file that tracks *current* state: what works, what is open, and a long list of measured dead ends under "Do not re-chase these". |
+| **`docs/NOTEBOOK.md`** | Gil's dated working notebook, and the only file that tracks *current* state: what works, what is open, and a long list of measured dead ends under "Do not re-chase these". Not needed to run games; read it before chasing a bug. |
 | **`docs/PROJECT.md`** | history. Contains conclusions later disproved, marked as such. |
 
 Some of what is in `RUNTIME.md`, as a taste: why libraries Wine `dlopen`s go missing on
@@ -126,9 +126,9 @@ tar xzf crossover-sources-26.3.0.tar.gz        # -> sources/wine
 git init -b main . && git add -A && git commit -m 'WineCX 26.3.0' && git tag winecx-26.3.0
 cd ../..
 
-#    (or, if you have access to the winecx-sources companion repository, which is
-#     the same tree already in git with releases tagged:
-#        git clone <winecx-sources> src/crossover
+#    (or clone the winecx-sources companion repository, which is the same tree
+#     already in git with each release tagged:
+#        git clone https://github.com/gilnoh/winecx-sources src/crossover
 #     CodeWeavers' tarball above remains the authoritative source either way.)
 
 # 3. GStreamer for Media Foundation video (~10 min; built, not from Homebrew)

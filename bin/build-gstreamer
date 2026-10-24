@@ -19,7 +19,7 @@
 # handler unless HKCU\Software\Wine\MediaFoundation\DisableGstByteStreamHandler
 # is set, and msmpeg2vdec's H.264 decoder is only a forward to winegstreamer's
 # CLSID_wg_h264_decoder. Found 2026-10-01 on Fantasy General II, whose Unity
-# player then spins forever at exit (docs/NEXT.md).
+# player then spins forever at exit (docs/NOTEBOOK.md).
 #
 # Why not Homebrew: x86_64 Homebrew has no gstreamer bottle for macOS 27, so
 # `brew install gstreamer` compiles the whole monolithic formula -- ~60

@@ -13,7 +13,7 @@ A/B testing, and so it is inert unless explicitly requested.
 PROVENANCE NOTE: this change was made in an earlier session and applied directly
 to src/wine WITHOUT a patch file, so `bin/build-runtime` from a clean checkout
 would silently have dropped it -- breaking the reproducibility guarantee that
-docs/NEXT.md claims. Extracted here to close that hole.
+docs/NOTEBOOK.md claims. Extracted here to close that hole.
 
 STATUS: likely redundant once the tree is rebased onto CrossOver's Wine, which
 carries CW Hack 24834 already. Kept so nothing is lost in the transition.

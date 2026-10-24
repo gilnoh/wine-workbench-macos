@@ -12,7 +12,7 @@
 > `src/crossover/sources/wine/dlls/wow64cpu/cpu.c`. A one-line
 > `grep -rl Rosetta src/crossover/sources/wine/` returns six files and lands on
 > it. A port to 11.14 was built and verified to make the game reach its menu; it
-> is **currently reverted** (see `docs/NEXT.md`).
+> is **currently reverted** (see `docs/NOTEBOOK.md`).
 >
 > **§7 below is WRONG.** It says "the fix is not in the thunk's code" and sends
 > the reader to the caller side. The divergence is in the thunk, `0x77` bytes past
@@ -234,7 +234,7 @@ This has not been confirmed and may be a red herring.
 > issued by the overlay right after hot-patching `mmdevapi`. CodeWeavers attribute
 > the failure to a SIGUSR1 race (Wine sends SIGUSR1 for thread suspension and
 > system-APC delivery); a competing, unresolved reading is translation-cache
-> invalidation from that very code patch. See `docs/NEXT.md`.
+> invalidation from that very code patch. See `docs/NOTEBOOK.md`.
 
 ## 7. The open question — where to look
 
@@ -374,14 +374,14 @@ $OD -D -b binary -m i386        /tmp/t.bin   # dec %esp; xchg %esi,%esp ... mov 
 | Missing VC++ 2022 runtime | Was a real difference from CrossOver's bottle, now installed, hang unchanged. |
 | `gldriverquery.exe` failing | Fails identically inside CrossOver's *working* bottle. |
 
-`docs/NEXT.md` carries a longer refuted list from the earlier Steam-client work.
+`docs/NOTEBOOK.md` carries a longer refuted list from the earlier Steam-client work.
 
 ## 11. Evidence on disk
 
 - `docs/evidence/sc3-spin-sample.txt` — `sample` output of the spinning process
 - `docs/evidence/sc3-wow64-fault-seh.txt` — `+seh` records around the fault
 - `docs/evidence/sc3-wow64-fault-modules.txt` — module map + the two warnings
-- `docs/NEXT.md` — current handover, §"The WoW64 mode switch"
+- `docs/NOTEBOOK.md` — current handover, §"The WoW64 mode switch"
 - `docs/RUNTIME.md` — what this runtime changes from stock Wine and why
 - `docs/PROJECT.md` — history; contains conclusions later disproved, marked as such
 

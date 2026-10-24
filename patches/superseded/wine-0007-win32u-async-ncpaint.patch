@@ -21,7 +21,7 @@ Ruled out along the way, each measured rather than argued:
     (the process environment was not confirmed), so msync is "not demonstrated"
     rather than "excluded".
   - CX HACK 23950 (shm surfaces): only fires for windows whose parent is in
-    another process. Our game is single-process. See docs/NEXT.md -- it is,
+    another process. Our game is single-process. See docs/NOTEBOOK.md -- it is,
     however, the fix for the separate Steam/--in-process-gpu problem.
 
 The load-bearing change is the WM_NCPAINT one. send_message() blocks the caller

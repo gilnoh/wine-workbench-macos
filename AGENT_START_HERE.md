@@ -4,7 +4,7 @@ You are working in a Wine workbench for macOS on Apple Silicon. Read `README.md`
 what the project is; this file is how to *operate* it.
 
 Nothing here is time-varying. Current status, open bugs and what to do next live in
-`docs/NEXT.md` — read that too, but do not copy its contents into this file.
+`docs/NOTEBOOK.md` — read that too, but do not copy its contents into this file.
 
 There are two things a user asks for here, and they overlap heavily:
 
@@ -23,7 +23,7 @@ Treat the second as the first plus a method. The environment is identical.
   This matters constantly: translated x86 code has different performance characteristics
   from native, and one whole class of bug here comes from that (see `RUNTIME.md` §4).
 - **The base is CodeWeavers' published CrossOver Wine ("WineCX"), not upstream Wine.**
-  Decided deliberately; the reasoning is in `docs/NEXT.md`. Do not propose switching to
+  Decided deliberately; the reasoning is in `docs/NOTEBOOK.md`. Do not propose switching to
   upstream for purity — the point is to be adoptable by the people who ship Wine on
   macOS.
 - **Before deriving a fix, check whether the base already has it.**
@@ -249,7 +249,7 @@ address.
 
 - **`docs/RUNTIME.md`** — durable: what this environment changes from stock Wine and why.
   Findings that will still be true next year go here.
-- **`docs/NEXT.md`** — current: state, open problems, and the "do not re-chase these"
+- **`docs/NOTEBOOK.md`** — current: state, open problems, and the "do not re-chase these"
   list of measured dead ends. Add refuted hypotheses there *with their evidence*; that
   list is worth more than it looks.
 - **`patches/*/README.md`** — why a patch exists, or why it was retracted or superseded.

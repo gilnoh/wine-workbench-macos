@@ -24,7 +24,7 @@
 #                      is src/crossover/sources/wine (their layout is
 #                      sources/wine, not wine/); output is
 #                      runtimes/winecx-<cxver>-x86_64. THIS IS THE PROJECT'S
-#                      BASE -- see docs/NEXT.md, "The pivot".
+#                      BASE -- see docs/NOTEBOOK.md, "The pivot".
 #   --version <wver>   upstream Wine from src/wine-<wver> (or src/wine when it is
 #                      checked out at that tag). Kept for the older runtimes.
 #
@@ -259,7 +259,7 @@ info "  tree differs from $(git -C "$SRC" describe --tags --always 2>/dev/null) 
 #
 # ⚠️ clang is NOT yet proven end to end here: a clang-built runtime produced
 # correct SSE code but could not connect to Steam (`EConnect` retried every 50 ms
-# forever, no TLS errors -- see docs/NEXT.md). Until that is understood, --pe-gcc
+# forever, no TLS errors -- see docs/NOTEBOOK.md). Until that is understood, --pe-gcc
 # is the safe route: it keeps the toolchain that works and only fixes the float
 # math, which is the one variable that matters here.
 PE_CFLAGS_ARG=""
@@ -394,7 +394,7 @@ if [ -f "$canary" ]; then
     [ "${sse:-0}" -gt 0 ] || die "i386 PE float math is x87, not SSE (dsound.dll: $sse SSE, $x87 x87)
   Rosetta 2 emulates x87 badly; this makes float-heavy 32-bit code ~60x slower and
   was the cause of the dsound mixer burning a core. Use clang for the PE build, or
-  add -msse2 -mfpmath=sse to i386_CFLAGS. See docs/NEXT.md."
+  add -msse2 -mfpmath=sse to i386_CFLAGS. See docs/NOTEBOOK.md."
     info "  i386 PE float math: $sse SSE / $x87 x87 instructions in dsound.dll"
 fi
 for a in x86_64-windows i386-windows x86_64-unix; do
