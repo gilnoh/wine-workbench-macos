@@ -1,0 +1,8 @@
+Starting initialization
+Setting DPI mode
+Reading command line
+Crash reporting system setup
+Setting project path
+Initializing config manager
+Initializing Plankton
+OGRE EXCEPTION(3:RenderingAPIException): wglCreateContextAttribsARB failed: F in Win32Window::create at C:\Users\Crashy\Desktop\Plankton-tech\Plankton_Package_Source\Dependencies\Ogre\RenderSystems\GL3Plus\src\windowing\win32\OgreWin32Window.cpp (line 497)

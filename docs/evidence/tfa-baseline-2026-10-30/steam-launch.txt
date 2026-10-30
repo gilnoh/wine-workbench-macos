@@ -1,0 +1,13 @@
+runprocess_log.txt
+10/30/26 22:45:24 [AppID 228980] Exit Code (0) :  "C:\Program Files (x86)\Steam\steamapps\common\Steamworks Shared\_CommonRedist\vcredist\2022\Microsoft Visual C++ 2022 x86.cmd"  GLE 0
+10/30/26 22:45:30 [AppID 228980] Exit Code (0) :  "C:\Program Files (x86)\Steam\steamapps\common\Steamworks Shared\_CommonRedist\vcredist\2022\Microsoft Visual C++ 2022 x64.cmd"  GLE 0
+10/30/26 22:45:31 [AppID 228980] Exit Code (0) :  "C:\Program Files (x86)\Steam\steamapps\common\Steamworks Shared\_CommonRedist\OpenAL\2.0.7.0\oalinst.exe" /s GLE 0
+
+gameprocess_log.txt
+[2026-10-30 22:45:33] AppID 1281220 adding PID 2792 as a tracked process ""S:\SteamLibrary\steamapps\common\Task Force Admiral\bin\master\TFA.exe""
+[2026-10-30 22:45:33] SSGL: InternalUpdateClientGame indicates change to games list
+[2026-10-30 22:45:34] AppID 1281220 adding PID 2816 as a tracked process ""S:\SteamLibrary\steamapps\common\Task Force Admiral\bin\master\CrashSender1500.exe" "b518811f-2011-4c75-b217-7fdadcb20668-tmp""
+[2026-10-30 22:45:37] AppID 1281220 no longer tracking PID 2816, exit code 0
+[2026-10-30 22:45:37] AppID 1281220 no longer tracking PID 2792, exit code 1
+[2026-10-30 22:45:37] Remove 1281220 from running list
+

@@ -6,6 +6,42 @@
 >
 > **New here?** Read `README.md` for what this project is, then `AGENT_START_HERE.md` for how to operate it, then **`RUNTIME.md` — §9 and §10 in particular**. Those two sections encode a rule that is invisible until it bites and then costs a session: wined3d cannot do D3D11 on this platform at all, and `BACKEND=` in a profile does not reach a Steam-launched game. Those three files are durable; anything time-varying belongs here.
 
+## 2026-10-30 — Task Force Admiral baseline fails at OpenGL context creation
+
+- **Measured from installed files:** Steam app `1281220`, build `26195252`,
+  installed under `library/SteamLibrary/steamapps/common/Task Force Admiral`.
+  `bin/master/TFA.exe` is PE32+ x86-64. Steam's local appinfo records that
+  executable and `bin/master` as its working directory. The adjacent
+  `plugins.cfg` enables `RenderSystem_GL3Plus`; its Direct3D11 entry is commented out.
+- `bin/gamerun tfa` launches through Steam in `steam-winecx`, using
+  `winecx-26.3.0-sse-x86_64` and `BACKEND=none` for the builtin OpenGL baseline.
+  Profile syntax and resolution checked.
+- **Measured from the user's baseline run, 22:45 local (Europe/Berlin):**
+  Steam ran the Visual C++ 2022 x86 and x64 installers and OpenAL 2.0.7.0;
+  all three returned exit code 0 (`logs/runprocess_log.txt`). Steam then
+  launched `TFA.exe` at 22:45:33, tracked `CrashSender1500.exe` at 22:45:34,
+  and recorded TFA exiting with code 1 at 22:45:37 (`logs/gameprocess_log.txt`).
+  No TFA or prerequisite installer remained in the process inspection afterwards.
+- **Measured failure:** `bin/master/init.log` and `Ogre.log` both report
+  `OGRE EXCEPTION(3:RenderingAPIException): wglCreateContextAttribsARB failed: F`
+  in `Win32Window::create`, `OgreWin32Window.cpp:497`. Ogre loaded
+  `RenderSystem_GL3Plus`, created the Win32 window, then failed creating the
+  GL context. **User report:** nothing appeared after the prerequisite installation.
+  This establishes a failure at GL context creation, not an installer hang.
+  **Follow-up measured:** a direct `+wgl` trace requests GL 4.0 core with no
+  context flags. Wine rejects this because macOS requires forward-compatible
+  3.2+ contexts. Changing only `CX_FWD_COMPAT_GL_CTX=1` (existing CW Hack 24834)
+  creates an Apple M1 Max GL 4.1 context; Ogre then reports shader compilation
+  failures and TFA exits 1. The switch was not persisted in the profile.
+  No museum or mission was reached. Exact subsequent shader failures remain open.
+  Comparison evidence and fresh Mesa measurements live in
+  `../mesa-wine-gl/docs/NOTEBOOK.md` and its linked evidence directory.
+  Preserved game logs: `docs/evidence/tfa-baseline-2026-10-30/`.
+- **User decision:** new work belongs in the sibling project
+  `../mesa-wine-gl`; `../progs/mesa_gl_to_metal` remains historical reference.
+  No old bridge, assertion suppression, or game shader modifications were
+  imported for this setup.
+
 ## Status 2026-10-24 — Sea Power runs on stock CrossOver with three of our files dropped in
 
 - **Result** (user report, 2026-10-24 ~19:40): CrossOver.app 26.3 (build 26.3.0.39832), bottle `Steam`, Sea Power mission **Gauntlet** loads its ships (Knox- and Perry-class frigates) after replacing three files with those from `winecx-26.3.0-sse-x86_64` (wine-0004 + 0007 + 0008). That run's `Player.log` has no exception lines and the `+seh` log has no `c0000005`/`80000003`/`c0000409`. **Control**, same bottle and mission with CrossOver's own files, same afternoon: no ships, the mission ends at once as "completed" (user report).
