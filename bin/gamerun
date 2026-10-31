@@ -133,6 +133,12 @@ esac
 
 [ -n "$EXE" ] || die "profile '$PROFILE' defines no EXE"
 
+# Optional game-specific readiness checks; shell/winecfg remain usable without
+# launching the game or requiring its services to be online.
+if declare -F profile_preflight >/dev/null; then
+    profile_preflight
+fi
+
 info "launching $PROFILE  [runtime=$RUNTIME backend=$BACKEND prefix=$PREFIX]"
 cd "${WORKDIR:-$(dirname "$EXE")}" 2>/dev/null || true
 exec env "${env_args[@]}" "$BIN/wine" "$EXE" ${ARGS:-} "$@"

@@ -97,6 +97,7 @@ load_profile() {
     WORKDIR=""
     WINEDLLOVERRIDES=""
     PROFILE_ENV=()
+    unset -f profile_preflight
     # shellcheck disable=SC1090
     source "$f"
     [ -n "$env_runtime" ] && RUNTIME="$env_runtime"

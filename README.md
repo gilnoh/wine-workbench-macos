@@ -148,6 +148,24 @@ bin/get-addons winecx-26.3.0-sse-x86_64
 bin/mkprefix mygames
 ```
 
+For TFA with the sibling `mesa-wine-gl` project built, use the `tfa` profile.
+It selects that project's graphics bundle and the separate Mesa-enabled Wine
+runtime in the existing `steam-winecx` prefix:
+
+```sh
+bin/gamerun steam          # if Steam is closed; wait until logged in
+# In another terminal:
+bin/gamerun tfa
+```
+
+The profile launches TFA directly so its graphics and audio settings reach the
+game even when Steam is already running. It verifies the bundle and Steam prefix,
+and refuses duplicate TFA instances. `TFA_GRAPHICS_BUNDLE=/absolute/path` selects
+another packaged graphics build. `bin/gamerun tfa-baseline` retains the original
+Apple OpenGL / Steam launch for comparison. Graphics build instructions live in
+the sister project's [bridge guide](../mesa-wine-gl/bridge/README.md); measured
+results and the selected bundle are recorded in [the notebook](docs/NOTEBOOK.md).
+
 The `git init` in step 2 is not optional. Patching needs git — to apply the series, to
 prove the tree is otherwise unmodified, and to name the base it was applied to — so
 `build-runtime` refuses to build without it. The source may sit in a subdirectory of that

@@ -6,6 +6,117 @@
 >
 > **New here?** Read `README.md` for what this project is, then `AGENT_START_HERE.md` for how to operate it, then **`RUNTIME.md` — §9 and §10 in particular**. Those two sections encode a rule that is invisible until it bites and then costs a session: wined3d cannot do D3D11 on this platform at all, and `BACKEND=` in a profile does not reach a Steam-launched game. Those three files are durable; anything time-varying belongs here.
 
+
+
+## 2026-10-31 — Personal launcher promoted to gamerun tfa
+
+`bin/gamerun tfa` now directly selects `winecx-26.3.0-mesa-gl-x86_64`, the
+existing `steam-winecx` prefix, sister `build/graphics-bundle-swap-fix`, the
+three KK experimental flags, and direct OpenAL WASAPI. Existing Steam must be
+online; a preflight checks its executable belongs to this prefix, hashes the
+bundle libraries and rejects an already-running TFA. Steam is not restarted.
+The former profile is retained as `tfa-baseline`. This supersedes earlier entries
+saying the stock tfa profile still selects the Apple baseline.
+
+**Measured:** launch `build/tfa-gamerun-20261031T094215Z.log` reports GL 4.6,
+Zink/KosmicKrisp on M1 Max, first GPU frame presented, and WASAPI playback at
+44100 Hz with 441/2646 buffering. **User confirmed** the menu and clear music
+work as before. Missing-bundle and duplicate-game attempts both exited 1 with
+the expected diagnostic; no second game was started. Bash syntax and diff checks
+pass. The game was left running. A log snapshot and launch-source hashes are
+preserved in the sister project's `docs/evidence/2026-10-31/tfa-gamerun/`.
+
+## 2026-10-31 — TFA early playable baseline: flicker and music resolved
+
+**Measured/user-confirmed in sister project:** missing framebuffer invalidation
+following front/back exchange was reproduced (four failing checks) and fixed
+(49/49 pass; deliberate negative controls detect failures). User confirms museum
+loading flicker/overlap is gone. Installed TFA LUT regression remains 139/139.
+
+Music corruption reproduced in isolated float and S16 static tones using the
+actual game OpenAL DLL through its default SDL3 backend. Both sounded clear with
+`ALSOFT_DRIVERS=wasapi`; the user then confirmed perfect music in a TFA mission.
+The game log verifies direct WASAPI. Both paths output 44.1 kHz but use different
+buffer sizes; precise SDL3/Wine fault remains unlocated. This is a validated
+backend workaround, not a proven sample-format bug.
+
+Working configuration: sister `bin/trace-tfa --graphics-bundle
+build/graphics-bundle-swap-fix --openal-driver wasapi
+--wine-debug=-all,+loaddll --wait`, from the sister repo with existing Steam online.
+Bordered 1280x720; experimental Wine runtime includes the normal workbench fixes.
+No game DLL/shader/music replacements. Stock `profiles/tfa.env` remains the Apple
+baseline. See sister notebook and `docs/evidence/2026-10-31/tfa-fixes/` there for
+full evidence. This establishes the user's early playable TFA goal, not general
+GL conformance or every mission. Game left running.
+
+## 2026-10-31 — Mission progression and music-only distortion clarified
+
+**User report from the ongoing windowed run:** Coral Sea starts at midnight,
+simulation time advances toward morning, and map operations appear correct.
+The game itself is reported to work. Engine, wind and sea-ambience audio sound
+correct; **only music playback is garbled/broken**. This supersedes the broader
+"audio broken" description above/in older entries. The static loading picture
+and progress-bar screen still flicker between different pictures.
+
+These are two remaining user-reported defects in the tested session, not a
+claim that all game features or general GL compatibility are complete. The
+music-specific result makes music decoding/streaming/buffering a useful next
+investigation target; it does not yet locate the fault or exclude shared audio
+code. Preserve the working effects path and compare music separately. For the
+loading flicker, reduce presentation behaviour without per-frame readbacks
+before changing buffer exchange/invalidation. Keep the ongoing mission running.
+
+## 2026-10-31 — First mission user report and runtime patch verification
+
+**User report, current windowed run:** mission entered and is proceeding okay;
+loading-image alternation persists, loading was somewhat long, and garbled audio
+(possibly music) also persists during the mission and is now the worst issue.
+This is initial mission evidence, not a completed mission or performance benchmark.
+
+**Verified from runtime provenance and current patch hashes:** the Mesa Wine
+runtime includes all three normal workbench Wine patches: argument injection
+0004, msync contention cleanup 0007, and macOS GS last-error mirroring 0008, plus
+the two opt-in graphics patches. Forced SSE PE compilation is retained. The live
+run records WINEMSYNC=1, the existing Steam prefix and bundled GStreamer paths.
+Diagnostic-only patches are excluded as in the normal runtime; DXMT is a separate
+backend and is not involved in this OpenGL run. The trace loads native OpenAL32,
+OgreOggSound and SDL3, plus Wine mmdevapi/CoreAudio. Which audio producer causes
+the distorted music remains unmeasured; the old 32-bit DirectSound/x87 cause
+must not be assumed. Next priority is a bounded audio comparison/reduction.
+
+## 2026-10-31 — TFA museum renders; window clipping corrected
+
+**User screenshots/report:** museum ships (carrier and South Dakota), ocean, sky
+and textures render with the experimental Mesa runtime and unchanged shader/LUT
+assets. The earlier loading stall recovered; a sample caught compute-pipeline
+compilation through KK/Metal. Loading-picture alternation and garbled/beeping
+audio remain open; missions are untested.
+
+At the user's request TFA alone was stopped, then relaunched after changing its
+backed-up personal display settings from borderless 1920x1080 to bordered
+1280x720. Ogre confirms that mode on Zink/KK, and the user confirms the window
+fits. Steam and the stock `tfa` profile are unchanged. This interactive run uses
+reduced tracing and stays alive under the sister project's `trace-tfa --wait`.
+Evidence and the six-month-old implementation comparison are in the sister
+project's current notebook entry.
+
+## 2026-10-31 — TFA shader probe and initial experimental launch
+
+**Measured in the sister project:** the installed final tone-mapping shader and
+actual LUT pass the Windows probe's 139 checks; the deliberate wrong-reference
+control fails exactly 96 pixel checks. This uses synthetic scene inputs, not the
+full engine. The unmodified game now initializes GL 4.6 on Zink/KosmicKrisp and
+submits frames with the experimental runtime. **User report:** normal-looking
+startup toward the main menu, then the window disappeared. A working interactive
+menu/museum/mission is not yet confirmed.
+
+The first launch disappeared shortly after its observation wrapper exited;
+managed-session cleanup is a hypothesis, not a measured cause. The sister
+project's `bin/trace-tfa --graphics-bundle PATH --wait` keeps the launcher alive
+for the follow-up. It uses the existing Steam session; the stock `tfa` profile,
+game shaders and assets are unchanged. Full evidence and scope are in the sister
+project's notebook under the installed TFA LUT entry.
+
 ## 2026-10-31 — Isolated Mesa GL runtime integration
 
 **Measured:** sister project `../mesa-wine-gl` has built the separate runtime
@@ -13,8 +124,10 @@
 graphics patch series. A dedicated Windows WGL probe passes 33 rendering,
 sharing, resize/rebind and presentation-submission checks through Mesa/Zink/KK.
 Wrong-output, missing-bridge and Apple-backend controls behave as expected.
-Visible window orientation/colour confirmation is still pending; no TFA result
-is implied. Graphics implementation and full evidence live in the sister
+The user's 2026-10-31 08:58:15 screenshot visually confirms the probe's
+blue/yellow upper quadrants and red/green lower quadrants. That capture run
+reached `CAPTURE_READY` but timed out during its hold, so it is visual evidence,
+not another completed automated pass. No TFA result is implied. Graphics implementation and full evidence live in the sister
 project's `docs/NOTEBOOK.md` and `docs/evidence/2026-10-31/wine-integration/`.
 
 `bin/build-runtime --extra-series FILE` consumes the graphics patches, checks

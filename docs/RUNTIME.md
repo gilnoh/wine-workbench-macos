@@ -613,6 +613,15 @@ A `*-direct.env` debug profile needs a **`steam_appid.txt`** in the game
 directory containing the appid, or the exe exits 53 as described above even with
 the client already online. Both games here have one.
 
+TFA's Mesa profile deliberately uses a direct launch with `SteamAppId` and
+`SteamGameId` set in its process environment. Its `profile_preflight` hook verifies
+that Steam is already running from the selected prefix, so the game can connect
+to that client without handing its launch back to Steam. This preserves the
+separate runtime, Mesa bundle and OpenAL backend selection. If Steam is closed,
+start `bin/gamerun steam`, wait for login, then run `bin/gamerun tfa`. The original
+Steam launch remains available as `tfa-baseline`. Do not generalize this exception
+to another game without measuring its Steam startup behaviour.
+
 ### ⚠️ `BACKEND=` in a profile does NOT reach a Steam-launched game
 
 This is the consequence of "does not inherit our environment", and it went
