@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Stage the TFA preview from explicit distributable inputs; never include bottles."""
-import argparse,hashlib,json,os,shutil,subprocess
+import argparse,hashlib,json,os,shutil,subprocess,sys
 from pathlib import Path
 p=argparse.ArgumentParser(description=__doc__);p.add_argument('output',type=Path);a=p.parse_args()
 wb=Path(__file__).resolve().parent.parent;gl=wb.parent/'mesa-wine-gl';out=a.output.resolve()
@@ -15,8 +15,8 @@ copy(wb/'release/tfa',out/'tfa');(out/'tools').mkdir();(out/'docs').mkdir();(out
 copy(wb/'bin/vendor/winetricks',out/'tools/winetricks')
 assert hashlib.sha256((out/'tools/winetricks').read_bytes()).hexdigest()=='954d17f56ae5f4d32eb083193a4a838c73ae5ff6b91765d93b0eab59cf2e7d29'
 copy(Path('/opt/homebrew/bin/cabextract').resolve(),out/'tools/cabextract')
-for f in ['TFA-RELEASE.md','TFA-BUILD.md']:copy(wb/'docs'/f,out/'docs'/f)
-(out/'README.md').write_text((wb/'docs/TFA-RELEASE.md').read_text().replace('](TFA-BUILD.md)', '](docs/TFA-BUILD.md)'))
+for f in ['TFA-RELEASE.md','TFA-BUILD.md','TFA-SEPARATE-USER-TEST.md']:copy(wb/'docs'/f,out/'docs'/f)
+(out/'README.md').write_text((wb/'docs/TFA-RELEASE.md').read_text().replace('](TFA-BUILD.md)', '](docs/TFA-BUILD.md)').replace('](TFA-SEPARATE-USER-TEST.md)', '](docs/TFA-SEPARATE-USER-TEST.md)'))
 for f in ['host-toolchain.json','build-steps.json','checkpoints.json']:copy(wb.parent/f,out/'provenance'/f)
 # Retain every installed dependency license/recipe/receipt for the relevant
 # Homebrew formulae. GStreamer subproject notices are retained separately.
@@ -34,7 +34,9 @@ for name,src in [('wine',gl/'src/winecx-bridge/sources/wine'),('mesa',gl/'src/me
   if '.git' in f.parts or not f.is_file():continue
   if f.name.upper().startswith(('LICENSE','COPYING','COPYRIGHT','NOTICE')):
    dest=out/'licenses'/name/f.relative_to(src);dest.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(f,dest)
-# Winetricks includes its LGPL license notice in the script itself.
+# Complete source/notices and payload ownership before producing the manifest.
+subprocess.run([sys.executable,str(wb/'tools/release/collect-sources.py'),str(out),str(out.parent/'supplemental-sources')],check=True)
+subprocess.run([sys.executable,str(wb/'tools/release/inventory.py'),str(out),str(out.parent/'supplemental-sources')],check=True)
 repos={name:{'commit':subprocess.check_output(['git','-C',str(path),'rev-parse','HEAD'],text=True).strip(),'repository':subprocess.check_output(['git','-C',str(path),'remote','get-url','origin'],text=True).strip()} for name,path in [('wine-workbench-macos',wb),('mesa-wine-gl',gl)]}
 files={};links={}
 for f in sorted(out.rglob('*')):
@@ -42,5 +44,5 @@ for f in sorted(out.rglob('*')):
   if not f.resolve().is_relative_to(out):raise SystemExit('External symlink: '+str(f))
   links[str(f.relative_to(out))]=os.readlink(f)
  elif f.is_file():files[str(f.relative_to(out))]=hashlib.sha256(f.read_bytes()).hexdigest()
-(out/'release-manifest.json').write_text(json.dumps({'name':'TFA playable preview 1','repositories':repos,'upstreams':json.loads((gl/'sources.lock.json').read_text()),'files_sha256':files,'symlinks':links,'status':'Private release candidate; cold setup and second-host validation pending'},indent=2)+'\n')
+(out/'release-manifest.json').write_text(json.dumps({'name':'TFA playable preview 1','repositories':repos,'upstreams':json.loads((gl/'sources.lock.json').read_text()),'files_sha256':files,'symlinks':links,'status':'Private rc2 candidate; cold setup passed; separate-user acceptance pending'},indent=2)+'\n')
 print(out)

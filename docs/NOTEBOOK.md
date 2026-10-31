@@ -8,6 +8,24 @@
 
 
 
+## 2026-10-31 — Source/notice inventory completed for rc2
+
+Measured inventory coverage: 3,775 payload files mapped to 23 shipped component
+groups; no unmapped bundled native library/helper. Added LLVM21.1.8, Z3 4.15.4,
+SPIRV-Tools/headers, pinned MoltenVK nested resources, translator/libclc and both
+MinGW build-source inputs. Full source/patch SHA records and original notices
+are retained. GitHub changed LLVM diff index abbreviation width; normalization
+to width13 reproduced the original recipe's exact SHA256 (no checksum bypass).
+Runtime Homebrew library executable sections were compared to their source kegs;
+SDL2 required the real2.32.10 Cellar path, since opt/sdl2 now names the shim.
+
+rc2 changes notices/documentation/source mapping only; verify all runtime,
+graphics, helper and launcher bytes against the previous tested manifest before
+upload. User requests release remain a private draft pending their separate-user
+acceptance test. Added checklist. This does not qualify another physical Mac.
+User requested unmodified desktop-visible screenshots; private graphics docs
+commit8516ad8 contains mission18:02 (portable run) and museum09:29 (earlier run).
+
 ## 2026-10-31 — Packaged setup passed; private draft release
 
 Measured: final archive extraction verified 3,933 file hashes and 48 symlinks;
