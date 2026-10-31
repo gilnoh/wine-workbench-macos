@@ -126,9 +126,9 @@ if [ "$PROVISION" = 1 ]; then
     info "provisioning: $VERBS"
     env WINEPREFIX="$PREFIX_PATH" \
         WINE="$BIN/wine" WINESERVER="$BIN/wineserver" \
-            PATH="$BIN:/opt/homebrew/bin:$PATH" \
+        PATH="$BIN:/opt/homebrew/bin:$PATH" \
         WINEDEBUG=-all \
-        "$WINETRICKS" -q $VERBS >/dev/null 2>&1 \
+        "$WINETRICKS" -q $VERBS >"$PREFIX_PATH/provisioning.log" 2>&1 \
         || die "winetricks provisioning failed (is cabextract installed? see bin/provision-host)"
     # Count with find, not `ls | wc -l`: see the note on the mono glob below --
     # under `set -eo pipefail` an `ls` of a missing directory kills the script.
