@@ -159,7 +159,9 @@ bin/gamerun tfa
 ```
 
 The profile launches TFA directly so its graphics and audio settings reach the
-game even when Steam is already running. It verifies the bundle and Steam prefix,
+game even when Steam is already running. Steam’s default C: library is supported;
+there is no requirement to add S:. The launcher reads Steam’s app manifests and
+registered library paths to find TFA. It verifies the bundle and Steam prefix,
 and refuses duplicate TFA instances. `TFA_GRAPHICS_BUNDLE=/absolute/path` selects
 another packaged graphics build. `bin/gamerun tfa-baseline` retains the original
 Apple OpenGL / Steam launch for comparison. Graphics build instructions live in

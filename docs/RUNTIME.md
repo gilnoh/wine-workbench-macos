@@ -619,7 +619,9 @@ that Steam is already running from the selected prefix, so the game can connect
 to that client without handing its launch back to Steam. This preserves the
 separate runtime, Mesa bundle and OpenAL backend selection. If Steam is closed,
 start `bin/gamerun steam`, wait for login, then run `bin/gamerun tfa`. The original
-Steam launch remains available as `tfa-baseline`. Do not generalize this exception
+Steam launch remains available as `tfa-baseline`. TFA is located through Steam
+app manifests in its default C: library or registered additional libraries.
+The optional S: mapping is a workbench convention, not a game requirement. Do not generalize this exception
 to another game without measuring its Steam startup behaviour.
 
 ### ⚠️ `BACKEND=` in a profile does NOT reach a Steam-launched game

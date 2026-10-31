@@ -8,6 +8,142 @@
 
 
 
+## 2026-10-31 — Fresh C: installation completed a normal mission
+
+**User report:** played fully normally; entering 3D took some moments and was the
+only observed hiccup. The earlier apparent stall recovered without intervention.
+The cause/duration of that delay was not sampled, so do not label it a proven
+shader-compilation stall. **Measured:** fresh game process exited 0; launch log
+selects GL 4.6 on Zink/KosmicKrisp, direct WASAPI with 44100 Hz / 441/2646 buffering,
+and presents a GPU frame. Combined with the 49-check swap and 139-check LUT probes,
+this establishes the fresh-build/fresh-bottle TFA milestone on this host.
+
+Steam and TFA were installed into the new prefix; TFA uses the default C: library,
+with isolated Documents and only three seeded window settings. No user prefix,
+login credentials, game settings or built runtime were copied from the working
+setup. Host Homebrew/Xcode prerequisites and the verified font/Microsoft installer
+cache were reused; cold installer downloads and another Mac remain unvalidated.
+Full evidence is under the graphics clone's docs/evidence/2026-10-31/clean-rebuild/.
+
+Next: make a separately named runtime/package relocatable and test the final
+packaged binaries. Current Wine still embeds absolute dlopen library names;
+its successful source rebuild does not make a zip portable. Preserve this working
+runtime and prefix while addressing packaging. No release has been published.
+
+## 2026-10-31 — Default C: installation supported and fresh game launched
+
+User installed TFA in Steam's default C: library. S: is optional. Added workbench
+`bin/find-steam-game` to read app manifests in the default Steam library and
+registered libraryfolders.vdf paths through the prefix's drive mappings. TFA's
+profile resolves its working directory at launch; inventory, trace and LUT tools
+use the same helper. Five focused fixture tests pass: default C:, S:, custom drive
+with spaces, missing executable, and duplicate installations. Also measured actual
+C: discovery in the new bottle and S: discovery in the original bottle.
+
+Fresh installed build is 26195252. TFA.exe, OpenAL32.dll, SDL3.dll, both tone-map
+GLSL files and base_lut.png match the original installation's SHA256 values.
+The first LUT attempt exposed a shared user-site ARM Pillow / x86 Python mismatch;
+created an isolated probe venv with Pillow 12.1.1. The rerun passes 139/139 and
+its negative control produces the expected 96 failures. Evidence remains under
+build/tfa-lut-20261031T121948.639675Z and ../fresh-game-comparison.json.
+
+Fresh Documents had no TFA settings. Seeded only Full Screen=No, Video Mode=1280
+x 720, border=Yes; no post-processing or other settings copied. Launched via the
+new gamerun profile, PID 82723, log ../logs/tfa-fresh-play-20261031T122111Z.log.
+User visual/audio/gameplay confirmation is pending; leave the game running.
+This supersedes earlier instructions requiring S: for this test. The immutable
+source/release checkpoint will need both updated repositories; binary relocation
+and cold Microsoft/font installer retrieval remain unvalidated.
+
+## 2026-10-31 — Fresh Steam installed; user login/game install pending
+
+Fresh-prefix retry completed successfully: 31 fonts, native VC++ runtime override,
+and Wine Mono installed. `get-addons` resolved the absolute source path from the
+new runtime's PROVENANCE and downloaded Mono 10.4.1 / Gecko 2.47.4. Prefix setup
+uses no DYLD_FALLBACK_LIBRARY_PATH. The winetricks script came from immutable
+commit 08304e81f9ac9a83c552a6bd78689040d174bf95 and matches the original SHA256.
+Font/Microsoft installers were read from the host's existing winetricks download
+cache; cold retrieval of those installers remains a release qualification check.
+
+Only symlinks inside the new prefix's user folders were replaced by local empty
+directories, preserving host folders. Documents is now internal and had no TFA
+settings. S: resolves to this reproduction workspace's separate library.
+Valve's official Steam installer was downloaded, hashed in ../steam-installer.json,
+and run with /S. Startup carries the existing Steam helper argument patch and
+WINEMSYNC=1. The bootstrapper updated win32 then win64, exited 42 during handoff,
+and the new Steam client and helpers remain running (observed main PID 79829).
+Logs: ../logs/install-steam.log, steam-first-launch.log, mkprefix-pinned.log.
+
+User was asked to sign in directly, add S: in Steam Settings > Storage, and install
+TFA there. No login credentials were requested or copied. Wait for confirmation
+before game launch. The personal Steam client was stopped at the user's request;
+its prefix/runtime remain unchanged. Binary relocation/package validation is
+still pending, as are fresh-bottle TFA shader probe and gameplay checks.
+
+## 2026-10-31 — Clean source rebuild and graphics controls pass; fresh bottle in progress
+
+User returned and explicitly resumed testing. The held supervisor was identity-
+checked and resumed; Wine had completed successfully while the supervisor was
+stopped. Fresh GStreamer, KK, Mesa bridge, Wine and graphics packaging all passed.
+The rebuilt Wine swap probe reports 49 checks / 0 failures; the wrong-reference
+control reports the expected 25 failures; missing-bridge and Apple-backend controls
+both reject initialization as expected. Full build-driver exit status is zero.
+Evidence is in the graphics clone's docs/evidence/2026-10-31/clean-rebuild/.
+This is a clean-source rebuild on the existing host, not independent-host validation
+or bit-identical rebuild proof. No game has yet run in the fresh bottle.
+
+Fresh-prefix setup exposed a false pin: get-winetricks downloaded master despite
+recording a checksum. The exact matching upstream commit was recovered as
+08304e81f9ac9a83c552a6bd78689040d174bf95; a fresh download from that immutable URL
+matches the original checksum. Fixed only in the reproduction branch. The failed
+prefix is preserved under build/prefix-before-winetricks-pin-fix, and creation
+from scratch is being retried with provisioning output saved inside the prefix.
+At the user's explicit request original Steam PID 85377 was verified against its
+executable path and stopped using SIGTERM; it exited without SIGKILL. Fresh Steam
+installation/login, isolated Documents, TFA installation and gameplay remain next.
+
+## 2026-10-31 — User away: visible execution explicitly on hold
+
+User requested no game or similar test requiring attention until they explicitly
+report being back. Do not launch Steam, TFA, wineboot/prefix setup or windowed
+probes meanwhile. Build supervisor PID 61593 was verified and SIGSTOPped alone;
+Wine build child PID 77344 continues. Supervisor state T was measured. Do not
+SIGCONT the supervisor before the user returns: its queued final step launches
+the windowed swap probe. Hold details are in ../ui-tests-on-hold.json.
+
+Fresh GStreamer, KosmicKrisp and Mesa bridge builds have passed. Wine source
+verification passed the five declared patches and compilation is underway.
+Graphics packaging, runtime probes and fresh-bottle gameplay are still pending.
+The build session is 60107. Verify process identity before any signal; these
+PIDs can become stale. Preserve the personal runtime/prefix.
+
+## 2026-10-31 — Isolated release reproduction in progress
+
+Workspace: `/Users/tailblues/tfa-release-repro/`. Initial clean source checkouts:
+workbench `898d3f127afccec6935f0765e22cf3ae633cbfcd`, graphics
+`2d414d76084bcb6292926d9a46f5eba3e75e16b3`. Cloned with `--no-local` from local
+commits; no prefixes, toolchains or built libraries copied. GitHub retrieval of
+these new commits and independent-host validation remain pending.
+
+Fresh upstream downloads verified: Mesa pin 18b8ad0, GStreamer 1.28.7 commit
+070125524a8422e29d3b69a372ed4f62fd343ffa, WineCX 26.3.0 archive SHA256
+ac99c8ca4b3848f3e81784135f023df266b61c2345726ea55a50b3e030dd6872.
+Wine source subtree matches c2843c34d906a3dbc4799053b3e02adfec4d67a8,
+independently of the old vendor repository's local commit metadata.
+
+Source recipes: `bin/fetch-tfa-sources`, then `bin/rebuild-tfa-local` in adjacent
+clones. The latter currently expects an unused Wine source destination and is an
+initial one-shot build driver, not the finished player installer. Host prerequisites
+are existing Homebrew/Xcode installations, recorded in ../host-toolchain.json.
+Build commands, statuses and logs are ../build-steps.json and ../logs/.
+
+Setup corrections are isolated in release/tfa-repro: honor --src before checking
+the default Wine tree; resolve absolute source paths for addons; stop masking
+prefix library failures with DYLD_FALLBACK_LIBRARY_PATH; propagate wineboot failure.
+Syntax checks pass; fresh-prefix execution of these changes is still pending.
+Fresh GStreamer build passed all 19 plugin checks. Graphics/Wine builds, fresh
+Steam login/gameplay, relocation and release packaging remain pending.
+
 ## 2026-10-31 — Personal launcher promoted to gamerun tfa
 
 `bin/gamerun tfa` now directly selects `winecx-26.3.0-mesa-gl-x86_64`, the
