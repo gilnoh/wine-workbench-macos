@@ -1,0 +1,9 @@
+{
+  "exit_status": 0,
+  "fonts": 31,
+  "native_vcruntime_override": true,
+  "steam_exe_present": true,
+  "empty_download_cache": true,
+  "homebrew_and_build_roots_blocked": true,
+  "launcher_sha256": "24e04eed0be73f48bd911527d60e9be6f4f3937253e7b0e528f2e902393c45fe"
+}

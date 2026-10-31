@@ -8,6 +8,22 @@
 
 
 
+## 2026-10-31 — Packaged setup passed; private draft release
+
+Measured: final archive extraction verified 3,933 file hashes and 48 symlinks;
+runtime/graphics bytes match the isolated gameplay-tested copy. Packaged setup
+completed exit 0 in an empty bottle/cache with Homebrew/development roots denied:
+31 fonts, native VC++ override and Steam.exe verified. No credentials/game were
+installed in that cold-test bottle. Evidence: portable-validation/cold-setup/.
+
+Release candidate assets and docs are under ../artifacts and the private
+mesa-wine-gl draft tfa-playable-preview-1. Workbench snapshot e3b008e and graphics
+79c1c0e are included as self-contained Git bundles. Repeated GitHub HTTP408 failures
+were resolved after the user switched networks; graphics release/tfa-repro is now
+pushed. Public workbench remote was not changed. Draft promotion still requires
+final dependency/source-license completeness review; second-host validation is
+not claimed. Private Steam/TFA bottles remain excluded from every artifact.
+
 ## 2026-10-31 — Portable gameplay confirmed; release candidate packaging
 
 User confirmed museum and first minutes of mission play as good as before,
