@@ -29,8 +29,13 @@ addons=""
 prov="$RUNTIMES_DIR/$RUNTIME/PROVENANCE"
 if [ -f "$prov" ]; then
     tree=$(sed -n 's/^source_tree: *//p' "$prov")
-    [ -n "$tree" ] && [ -f "$GAMES_ROOT/$tree/dlls/appwiz.cpl/addons.c" ] \
-        && addons="$GAMES_ROOT/$tree/dlls/appwiz.cpl/addons.c"
+    case "$tree" in
+        /*) ;;
+        "") ;;
+        *) tree="$GAMES_ROOT/$tree" ;;
+    esac
+    [ -n "$tree" ] && [ -f "$tree/dlls/appwiz.cpl/addons.c" ] \
+        && addons="$tree/dlls/appwiz.cpl/addons.c"
 fi
 if [ -z "$addons" ]; then
     for c in "$GAMES_ROOT/src/wine-${RUNTIME#wine-}/dlls/appwiz.cpl/addons.c" \

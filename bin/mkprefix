@@ -41,7 +41,8 @@ BIN="$(runtime_bin "$RUNTIME")"
 # which is one level too high -- runtimes/share/wine/mono rather than
 # runtimes/<runtime>/share/wine/mono -- so it never found an MSI that was there.
 RT_ROOT="$(dirname "$BIN")"
-DYLD="$(runtime_dyld_path "$RUNTIME"):/usr/lib"
+# Resolve runtime dependencies from its bundle; never hide missing libraries.
+unset DYLD_FALLBACK_LIBRARY_PATH
 
 info "creating prefix '$NAME' with runtime '$RUNTIME'"
 mkdir -p "$PREFIX_PATH"
@@ -59,8 +60,8 @@ mkdir -p "$PREFIX_PATH"
 env WINEPREFIX="$PREFIX_PATH" \
     WINEDLLOVERRIDES="mscoree,mshtml=" \
     PATH="$BIN:$PATH" \
-    DYLD_FALLBACK_LIBRARY_PATH="$DYLD" \
-    "$BIN/wine" wineboot --init 2>&1 | grep -viE "^wine: created|fixme:" || true
+    "$BIN/wine" wineboot --init >"$PREFIX_PATH/wineboot.log" 2>&1 \
+    || { cat "$PREFIX_PATH/wineboot.log"; die "wineboot failed"; }
 
 info "waiting for wineserver to settle"
 env WINEPREFIX="$PREFIX_PATH" PATH="$BIN:$PATH" "$BIN/wineserver" -w
@@ -125,8 +126,7 @@ if [ "$PROVISION" = 1 ]; then
     info "provisioning: $VERBS"
     env WINEPREFIX="$PREFIX_PATH" \
         WINE="$BIN/wine" WINESERVER="$BIN/wineserver" \
-        DYLD_FALLBACK_LIBRARY_PATH="$DYLD" \
-        PATH="$BIN:/opt/homebrew/bin:$PATH" \
+            PATH="$BIN:/opt/homebrew/bin:$PATH" \
         WINEDEBUG=-all \
         "$WINETRICKS" -q $VERBS >/dev/null 2>&1 \
         || die "winetricks provisioning failed (is cabextract installed? see bin/provision-host)"
@@ -180,7 +180,7 @@ if [ "$PROVISION" = 1 ]; then
     if [ -n "$mono_msi" ]; then
         info "provisioning: wine-mono ($(basename "$mono_msi"))"
         env WINEPREFIX="$PREFIX_PATH" PATH="$BIN:$PATH" \
-            DYLD_FALLBACK_LIBRARY_PATH="$DYLD" WINEDEBUG=-all \
+            WINEDEBUG=-all \
             "$BIN/wine" msiexec /i "$(cd "$(dirname "$mono_msi")" && pwd)/$(basename "$mono_msi")" /qn >/dev/null 2>&1
         env WINEPREFIX="$PREFIX_PATH" PATH="$BIN:$PATH" "$BIN/wineserver" -w
         [ -d "$PREFIX_PATH/drive_c/windows/mono" ] && info "  wine-mono installed" \
