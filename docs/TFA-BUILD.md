@@ -1,6 +1,6 @@
 # Rebuild and package the TFA preview
 
-The release assets include exact workbench and mesa-wine-gl source snapshots.
+The release assets include exact workbench and mesa-wine-gl Git bundles and upstream source archives.
 `release-manifest.json` records their commit IDs, upstream revisions, and file
 hashes. Private repository access is needed for GitHub source links. Source
 snapshots allow inspection without relying on mutable branch names.
@@ -19,9 +19,10 @@ bin/fetch-tfa-sources
 bin/rebuild-tfa-local
 ```
 
-If the workbench release commit is not on the public remote, extract the supplied
-workbench source snapshot instead; initialize Git and commit that snapshot before
-building if a helper requires Git metadata. The two directories must be named
+For the supplied source bundles, use `git clone wine-workbench-macos.bundle
+wine-workbench-macos` and `git clone mesa-wine-gl.bundle mesa-wine-gl`, then
+check out the manifest commits. This also works when the workbench release
+commit has not been pushed to the public remote. The two directories must be named
 `wine-workbench-macos` and `mesa-wine-gl` and share a parent. The build driver
 expects a fresh workspace and logs each step under `../logs/`. It also runs a
 visible graphics probe at the end. Do not run it while someone expects the
