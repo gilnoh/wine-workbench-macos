@@ -13,6 +13,7 @@
 #   --name NAME           output runtimes/NAME instead of the derived name
 #   --pe-gcc              use mingw-gcc for the PE build (with SSE math forced)
 #                         instead of clang -- see "the PE compiler" below
+#   --extra-series FILE   additional declared patches, relative to FILE's directory
 #
 # Environment: PE_CC=<compiler> overrides the PE compiler entirely;
 #              MACOSX_DEPLOYMENT_TARGET is honoured and recorded;
@@ -49,6 +50,7 @@ JOBS=8
 WITH_DEBUG=0
 FORCE=0
 PE_GCC=0
+EXTRA_SERIES=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --winecx)  MODE=winecx; CXVER="$2"; shift 2 ;;
@@ -59,12 +61,19 @@ while [ $# -gt 0 ]; do
         --with-debug) WITH_DEBUG=1; shift ;;     # also apply class 'debug' patches
         --force)   FORCE=1; shift ;;
         --pe-gcc)  PE_GCC=1; shift ;;            # mingw-gcc + forced SSE math
+        --extra-series) EXTRA_SERIES="$2"; shift 2 ;;
         *) die "unknown option: $1" ;;
     esac
 done
 
 SERIES="$GAMES_ROOT/patches/series"
 [ -f "$SERIES" ] || die "no patch series at $SERIES"
+SERIES_FILES=("$SERIES")
+if [ -n "$EXTRA_SERIES" ]; then
+    [ -f "$EXTRA_SERIES" ] || die "missing extra series: $EXTRA_SERIES"
+    EXTRA_SERIES="$(cd "$(dirname "$EXTRA_SERIES")" && pwd -P)/$(basename "$EXTRA_SERIES")"
+    SERIES_FILES+=("$EXTRA_SERIES")
+fi
 
 # --- resolve source tree and runtime name ---------------------------------
 TARBALL=""
@@ -182,6 +191,26 @@ info "applying patches from $(basename "$SERIES")"
 applied=0 skipped=0
 PATCHED_FILES=""
 APPLIED_LIST=""
+PATCH_PATHS=()
+# Recognize the complete series before testing individual patches: a later
+# patch may change a file introduced by an earlier patch, preventing that
+# earlier patch's reverse-check from succeeding on an otherwise correct tree.
+verify_index=$(mktemp)
+rm "$verify_index"
+GIT_INDEX_FILE="$verify_index" git -C "$SRC_ROOT" read-tree HEAD || die "cannot prepare patch verification"
+for series_file in "${SERIES_FILES[@]}"; do
+    while read -r class patch; do
+        case "${class:-}" in ''|\#*) continue ;; esac
+        case "$patch" in dxmt-*) continue ;; esac
+        [ "$class" != debug ] || [ "$WITH_DEBUG" != 0 ] || continue
+        case "$class" in fix|workaround|debug) ;; *) die "unknown patch class: $class" ;; esac
+        p="$(dirname "$series_file")/$patch"
+        GIT_INDEX_FILE="$verify_index" "${GIT_APPLY[@]}" --cached "$p" || die "cannot reconstruct patch series"
+    done < "$series_file"
+done
+series_present=0
+GIT_INDEX_FILE="$verify_index" git -C "$SRC_ROOT" diff --quiet -- "${SRC_PREFIX:-.}" && series_present=1
+for series_file in "${SERIES_FILES[@]}"; do
 while read -r class patch; do
     case "${class:-}" in ''|\#*) continue ;; esac
     case "$patch" in dxmt-*) continue ;; esac          # DXMT builds separately
@@ -189,9 +218,13 @@ while read -r class patch; do
         info "  skip  $patch (class debug)"
         skipped=$((skipped+1)); continue
     fi
-    p="$GAMES_ROOT/patches/$patch"
+    case "$class" in fix|workaround|debug) ;; *) die "unknown patch class: $class" ;; esac
+    p="$(dirname "$series_file")/$patch"
     [ -f "$p" ] || die "missing patch: $p"
-    if "${GIT_APPLY[@]}" --check "$p" 2>/dev/null; then
+    if [ "$series_present" = 1 ]; then
+        info "  ok    $patch (complete series already applied)"
+        applied=$((applied+1))
+    elif "${GIT_APPLY[@]}" --check "$p" 2>/dev/null; then
         "${GIT_APPLY[@]}" "$p" || die "failed to apply $patch"
         info "  apply $patch ($class)"
         applied=$((applied+1))
@@ -204,12 +237,14 @@ while read -r class patch; do
   patch is a port of a CW/CX HACK, delete it) or the base moved under it."
     fi
     APPLIED_LIST="$APPLIED_LIST $patch"
+    PATCH_PATHS+=("$p")
     # --numstat only parses the patch, so it works whether or not it applied
     # here; the third field is the path.
     for f in $(git -C "$SRC_ROOT" apply --numstat "$p" 2>/dev/null | awk '{print $3}'); do
         PATCHED_FILES="$PATCHED_FILES ${SRC_PREFIX}$f"
     done
-done < "$SERIES"
+done < "$series_file"
+done
 info "patches: $applied applied, $skipped skipped"
 
 # The tree must now differ from its last commit ONLY by the patches we applied.
@@ -239,6 +274,11 @@ done
   them to $SERIES, or discard them:
     git -C $SRC checkout --$stray"
 info "  tree differs from $(git -C "$SRC" describe --tags --always 2>/dev/null) only by the series, and every patch really applied"
+
+# Compare contents too, not just filenames. Include files introduced by patches.
+GIT_INDEX_FILE="$verify_index" git -C "$SRC_ROOT" diff --exit-code -- "${SRC_PREFIX:-.}" \
+    || die "source contents differ from the declared series"
+rm "$verify_index"
 
 # --- build ----------------------------------------------------------------
 # Everything below must run in an x86_64 shell AND with CC forced, including
@@ -400,8 +440,7 @@ fi
 for a in x86_64-windows i386-windows x86_64-unix; do
     [ -d "$PREFIX/lib/wine/$a" ] || die "missing arch dir: $a"
 done
-ver=$(DYLD_FALLBACK_LIBRARY_PATH="$(runtime_dyld_path "$NAME"):/usr/lib" \
-      WINEDEBUG=-all "$PREFIX/bin/wine" --version 2>/dev/null)
+ver=$(WINEDEBUG=-all "$PREFIX/bin/wine" --version 2>/dev/null)
 info "  version:   $ver"
 info "  32-bit builtins: $(ls "$PREFIX/lib/wine/i386-windows" | wc -l | tr -d ' ')"
 info "  deps:      vulkan freetype gnutls all found"
@@ -435,6 +474,10 @@ fi
     echo "source_commit:     $(git -C "$SRC" rev-parse HEAD 2>/dev/null)"
     echo "source_base:       $(git -C "$SRC" describe --tags --always 2>/dev/null)"
     echo "patches:          ${APPLIED_LIST:- none}"
+    for p in "${PATCH_PATHS[@]}"; do
+        echo "patch_sha256:      $(shasum -a 256 "$p")"
+    done
+    [ -z "$EXTRA_SERIES" ] || echo "extra_series:      $EXTRA_SERIES"
     echo "configure:         $CONFIGURE_ARGS"
     echo "built:             $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
     echo "built_by:          bin/build-runtime"

@@ -6,6 +6,22 @@
 >
 > **New here?** Read `README.md` for what this project is, then `AGENT_START_HERE.md` for how to operate it, then **`RUNTIME.md` — §9 and §10 in particular**. Those two sections encode a rule that is invisible until it bites and then costs a session: wined3d cannot do D3D11 on this platform at all, and `BACKEND=` in a profile does not reach a Steam-launched game. Those three files are durable; anything time-varying belongs here.
 
+## 2026-10-31 — Isolated Mesa GL runtime integration
+
+**Measured:** sister project `../mesa-wine-gl` has built the separate runtime
+`winecx-26.3.0-mesa-gl-x86_64` from an isolated WineCX checkout and its declared
+graphics patch series. A dedicated Windows WGL probe passes 33 rendering,
+sharing, resize/rebind and presentation-submission checks through Mesa/Zink/KK.
+Wrong-output, missing-bridge and Apple-backend controls behave as expected.
+Visible window orientation/colour confirmation is still pending; no TFA result
+is implied. Graphics implementation and full evidence live in the sister
+project's `docs/NOTEBOOK.md` and `docs/evidence/2026-10-31/wine-integration/`.
+
+`bin/build-runtime --extra-series FILE` consumes the graphics patches, checks
+source contents against the complete declared series, and records patch hashes.
+The experimental test prefix is in the sister project's `build/prefix-wgl`.
+The normal `tfa` profile still uses the original runtime and Steam prefix.
+
 ## 2026-10-30 — Task Force Admiral baseline fails at OpenGL context creation
 
 - **Measured from installed files:** Steam app `1281220`, build `26195252`,
