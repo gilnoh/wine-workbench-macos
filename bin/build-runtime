@@ -79,7 +79,7 @@ fi
 TARBALL=""
 if [ "$MODE" = winecx ]; then
     NAME="winecx-$CXVER-x86_64"
-    SRC="${WINECX_SRC:-$GAMES_ROOT/src/crossover/sources/wine}"
+    SRC="${SRC_OVERRIDE:-${WINECX_SRC:-$GAMES_ROOT/src/crossover/sources/wine}}"
     TARBALL="$GAMES_ROOT/src/crossover/crossover-sources-$CXVER.tar.gz"
     [ -d "$SRC" ] || die "no WineCX source tree at $SRC
   Get it with:
