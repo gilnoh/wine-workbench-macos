@@ -8,6 +8,16 @@
 
 
 
+## 2026-10-31 — rc2 ready for separate-user acceptance
+
+Final rc2 extraction verified all4,276 file hashes and48 symlinks. Runtime,
+graphics, helpers and launcher remain byte-identical to the earlier gameplay/
+cold-setup-tested candidate. All13 GitHub asset digests matched local SHA256;
+release body was reread and verified. Removed the superseded binary asset.
+The release remains private and draft at the user's request pending their
+separate-account test. Current link and exact asset names are retained in
+../artifacts/rc2-github-verification.json. No user account or disk changes made.
+
 ## 2026-10-31 — Source/notice inventory completed for rc2
 
 Measured inventory coverage: 3,775 payload files mapped to 23 shipped component
