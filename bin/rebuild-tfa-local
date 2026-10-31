@@ -1,0 +1,62 @@
+#!/usr/bin/env python3
+"""Rebuild the TFA stack in adjacent clean workbench and mesa-wine-gl clones.
+Uses existing host compiler prerequisites; never copies existing build products.
+"""
+from pathlib import Path
+from datetime import datetime, timezone
+import hashlib, json, os, shutil, subprocess, sys
+wb=Path(__file__).resolve().parent.parent
+root=wb.parent; mesa=root/'mesa-wine-gl'; logs=root/'logs'; logs.mkdir(exist_ok=True)
+assert (mesa/'sources.lock.json').is_file(), 'Place mesa-wine-gl next to the workbench clone'
+for name in ('src','build','toolchains'):
+    (mesa/name).mkdir(exist_ok=True); (wb/name).mkdir(exist_ok=True)
+env=os.environ.copy(); env['JOBS']='6'
+events=[]
+def run(name,cmd,cwd=wb,extra=None):
+    print(f'{name}: running (log {logs/name})',flush=True)
+    record={'step':name,'command':list(map(str,cmd)),'cwd':str(cwd),'started':datetime.now(timezone.utc).isoformat()}
+    events.append(record)
+    with (logs/name).open('w') as log:
+        p=subprocess.run(list(map(str,cmd)),cwd=cwd,env=env| (extra or {}),stdout=log,stderr=subprocess.STDOUT)
+    record['exit_status']=p.returncode;record['finished']=datetime.now(timezone.utc).isoformat()
+    (root/'build-steps.json').write_text(json.dumps(events,indent=2)+'\n')
+    if p.returncode:
+        print((logs/name).read_text(errors='replace')[-6000:],flush=True)
+        raise SystemExit(f'{name} failed ({p.returncode})')
+    print(f'{name}: passed',flush=True)
+def git(path,*args):
+    return subprocess.check_output(['git','-C',str(path),*args],text=True).strip()
+lock=json.loads((mesa/'sources.lock.json').read_text())
+assert git(mesa/'src/mesa','rev-parse','HEAD')==lock['mesa']['commit']
+assert git(wb/'src/gstreamer','rev-parse','HEAD')=='070125524a8422e29d3b69a372ed4f62fd343ffa'
+archive=root/'downloads/crossover-sources-26.3.0.tar.gz'
+assert hashlib.sha256(archive.read_bytes()).hexdigest()=='ac99c8ca4b3848f3e81784135f023df266b61c2345726ea55a50b3e030dd6872'
+winesrc=mesa/'src/winecx-bridge'
+assert not winesrc.exists(), 'Use a fresh Wine source destination for this clean build'
+winesrc.mkdir()
+run('extract-wine.log',['tar','-xzf',archive,'-C',winesrc,'sources/wine'])
+run('init-wine.log',['git','init',winesrc])
+run('add-wine.log',['git','-C',winesrc,'add','sources/wine'])
+# Compare actual Wine source content to the original pinned vendor tree, without
+# requiring its local-only Git history. Source archive SHA is the public input.
+tree=git(winesrc,'write-tree')
+assert git(winesrc,'rev-parse',tree+':sources/wine')=='c2843c34d906a3dbc4799053b3e02adfec4d67a8','Wine source tree differs'
+run('commit-wine.log',['git','-C',winesrc,'-c','user.name=TFA reproducible build','-c','user.email=build@localhost','commit','-m','WineCX 26.3.0 source archive'],extra={'GIT_AUTHOR_DATE':'2026-08-01T00:00:00Z','GIT_COMMITTER_DATE':'2026-08-01T00:00:00Z'})
+run('tag-wine.log',['git','-C',winesrc,'tag','winecx-26.3.0'])
+(wb/'src/crossover').mkdir(exist_ok=True)
+shutil.copyfile(archive,wb/'src/crossover'/archive.name)
+run('mesa-python-venv.log',['/usr/bin/arch','-x86_64','/usr/local/bin/python3','-m','venv',mesa/'toolchains/python-x86_64'])
+run('mesa-python-install.log',[mesa/'toolchains/python-x86_64/bin/python','-m','pip','install','-r',mesa/'config/python-build-requirements.txt'])
+run('mesa-worktree.log',['git','-C',mesa/'src/mesa','worktree','add','--detach',mesa/'src/mesa-xfb',lock['mesa']['commit']])
+for line in (mesa/'patches/series').read_text().splitlines():
+    if line.strip() and not line.startswith('#'):
+        _,name=line.split()
+        run('apply-'+Path(name).name+'.log',['git','-C',mesa/'src/mesa-xfb','apply',mesa/'patches'/name])
+run('host-check.log',[wb/'bin/provision-host','--check'])
+run('gstreamer.log',[wb/'bin/build-gstreamer'])
+run('kosmickrisp.log',[mesa/'bin/build-kk-experiment'],mesa)
+run('bridge.log',[mesa/'bin/build-bridge'],mesa)
+run('wine.log',[wb/'bin/build-runtime','--winecx','26.3.0','--pe-gcc','--name','winecx-26.3.0-mesa-gl-x86_64','--src',winesrc/'sources/wine','--extra-series',mesa/'patches/wine/series','--jobs','6'])
+run('graphics-package.log',[mesa/'bin/package-graphics',mesa/'build/graphics-bundle-swap-fix'],mesa)
+run('swap-probe.log',[mesa/'bin/measure-wine-swap','--bundle',mesa/'build/graphics-bundle-swap-fix'],mesa)
+print('Clean build and swap controls complete. Fresh Steam/TFA validation remains.',flush=True)
