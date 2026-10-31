@@ -1,0 +1,33 @@
+#!/usr/bin/env python3
+"""Fetch pinned upstream source inputs for bin/rebuild-tfa-local."""
+from pathlib import Path
+import hashlib,json,subprocess
+wb=Path(__file__).resolve().parent.parent;root=wb.parent;mesa=root/'mesa-wine-gl'
+lock=json.loads((mesa/'sources.lock.json').read_text())
+logs=root/'logs';logs.mkdir(exist_ok=True)
+def source(path,url,revision,expected):
+    path.parent.mkdir(parents=True,exist_ok=True)
+    with (logs/('fetch-'+path.name+'.log')).open('a') as log:
+        if not path.exists():
+            subprocess.run(['git','init',str(path)],check=True,stdout=log,stderr=subprocess.STDOUT)
+            subprocess.run(['git','-C',str(path),'remote','add','origin',url],check=True)
+            subprocess.run(['git','-C',str(path),'fetch','--depth=1','origin',revision],check=True,stdout=log,stderr=subprocess.STDOUT)
+            subprocess.run(['git','-C',str(path),'checkout','--detach','FETCH_HEAD'],check=True,stdout=log,stderr=subprocess.STDOUT)
+        actual=subprocess.check_output(['git','-C',str(path),'rev-parse','HEAD'],text=True).strip()
+        if actual!=expected:raise SystemExit(f'Wrong source revision at {path}: {actual}')
+        subprocess.run(['git','-C',str(path),'diff','--exit-code','HEAD'],check=True,stdout=log,stderr=subprocess.STDOUT)
+    print(f'Verified {path.name}: {actual}',flush=True)
+source(mesa/'src/mesa',lock['mesa']['url'],lock['mesa']['commit'],lock['mesa']['commit'])
+source(wb/'src/gstreamer','https://gitlab.freedesktop.org/gstreamer/gstreamer.git','refs/tags/1.28.7','070125524a8422e29d3b69a372ed4f62fd343ffa')
+# The GStreamer builder uses git describe to name its installation directory.
+subprocess.run(['git','-C',str(wb/'src/gstreamer'),'fetch','--depth=1','origin','tag','1.28.7'],check=True)
+downloads=root/'downloads';downloads.mkdir(exist_ok=True)
+archive=downloads/'crossover-sources-26.3.0.tar.gz'
+if not archive.exists():
+    part=archive.with_suffix('.gz.part')
+    subprocess.run(['curl','--fail','--location','--retry','2','--output',str(part),'https://media.codeweavers.com/pub/crossover/source/'+archive.name],check=True)
+    actual=hashlib.sha256(part.read_bytes()).hexdigest()
+    if actual!='ac99c8ca4b3848f3e81784135f023df266b61c2345726ea55a50b3e030dd6872':raise SystemExit('Wine archive checksum mismatch; retained .part for inspection')
+    part.rename(archive)
+assert hashlib.sha256(archive.read_bytes()).hexdigest()=='ac99c8ca4b3848f3e81784135f023df266b61c2345726ea55a50b3e030dd6872'
+print('Verified WineCX source archive',flush=True)
