@@ -7,6 +7,7 @@
 # Options:
 #   --jobs N              parallel make jobs (default 8)
 #   --with-debug          also apply class 'debug' patches from patches/series
+#   --portable            resolve bundled dlopen/link dependencies relative to modules
 #   --force               build over an existing runtime (also needed after a
 #                         FAILED build, which leaves the directory behind)
 #   --src DIR             use this source tree instead of the mode's default
@@ -51,6 +52,7 @@ WITH_DEBUG=0
 FORCE=0
 PE_GCC=0
 EXTRA_SERIES=""
+PORTABLE=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --winecx)  MODE=winecx; CXVER="$2"; shift 2 ;;
@@ -60,6 +62,7 @@ while [ $# -gt 0 ]; do
         --jobs)    JOBS="$2"; shift 2 ;;
         --with-debug) WITH_DEBUG=1; shift ;;     # also apply class 'debug' patches
         --force)   FORCE=1; shift ;;
+        --portable) PORTABLE=1; shift ;;
         --pe-gcc)  PE_GCC=1; shift ;;            # mingw-gcc + forced SSE math
         --extra-series) EXTRA_SERIES="$2"; shift 2 ;;
         *) die "unknown option: $1" ;;
@@ -176,12 +179,20 @@ for pair in "vulkan:libvulkan.1.dylib" "freetype:libfreetype.6.dylib" \
             "gnutls:libgnutls.30.dylib" "SDL2:libSDL2-2.0.0.dylib"; do
     name="${pair%%:*}"; lib="${pair##*:}"
     if [ -e "$BUNDLE/$lib" ]; then
-        SEED="$SEED ac_cv_lib_soname_$name=$BUNDLE/$lib"
+        if [ "$PORTABLE" = 1 ]; then
+            SEED="$SEED ac_cv_lib_soname_$name=@loader_path/../../bundled/$lib"
+        else
+            SEED="$SEED ac_cv_lib_soname_$name=$BUNDLE/$lib"
+        fi
     else
         info "  note: $lib not bundled, $name keeps its bare soname"
     fi
 done
-info "  seeding configure with absolute sonames from the bundle"
+if [ "$PORTABLE" = 1 ]; then
+    info "  seeding configure with module-relative bundled sonames"
+else
+    info "  seeding configure with absolute sonames from the bundle"
+fi
 
 # --- patches --------------------------------------------------------------
 # On a WineCX base, `patches/series` should hold only OUR deltas. A patch that is
@@ -393,9 +404,18 @@ for s in SONAME_LIBVULKAN SONAME_LIBFREETYPE SONAME_LIBGNUTLS SONAME_LIBSDL2; do
     grep -q "define $s" "$cfg" || die "configure did not find $s -- runtime would be degraded"
     # A bare soname here means the seeding did not take, and the runtime would
     # silently lose that library in any process without DYLD_FALLBACK_LIBRARY_PATH.
-    grep -qE "define $s \"/" "$cfg" || die "$s is a bare soname, not an absolute path -- seeding failed"
+    if [ "$PORTABLE" = 1 ]; then
+        grep -qF "define $s \"@loader_path/../../bundled/" "$cfg" \
+            || die "$s is not module-relative -- portable seeding failed"
+    else
+        grep -qE "define $s \"/" "$cfg" || die "$s is a bare soname, not an absolute path -- seeding failed"
+    fi
 done
-info "  sonames are absolute paths into the bundle"
+if [ "$PORTABLE" = 1 ]; then
+    info "  sonames resolve relative to Unix modules"
+else
+    info "  sonames are absolute paths into the bundle"
+fi
 
 # winegstreamer.so LINKS GStreamer (it is not dlopened by soname), so its load
 # commands name the toolchain. Point them at the bundle copies.
@@ -409,17 +429,22 @@ while read -r d; do
     r=$(awk -v b="$b" '$1==b{print $2}' "$BUNDLE/gstreamer-renames" 2>/dev/null)
     b="${r:-$b}"
     [ -e "$BUNDLE/$b" ] || die "winegstreamer.so needs $b, which is not in the bundle"
-    install_name_tool -change "$d" "$BUNDLE/$b" "$ws"
+    target="$BUNDLE/$b"
+    [ "$PORTABLE" != 1 ] || target="@loader_path/../../bundled/$b"
+    install_name_tool -change "$d" "$target" "$ws"
 done < <(otool -L "$ws" | tail -n +2 | awk '{print $1}')
-codesign --force -s - "$ws" >/dev/null 2>&1 || true
+codesign --force -s - "$ws" >/dev/null 2>&1 || die "cannot sign winegstreamer.so"
 
 # Assert: no Unix-side module links anything outside the system and the bundle.
 # This is the general form of the winedmo/ffmpeg gap: a library linked by
 # absolute Homebrew path works on the build host and nowhere else, and works
 # here only until the next `brew upgrade`.
+allowed_deps=": (/usr/lib/|/System/|@rpath/|@loader_path/\.\./\.\./bundled/"
+[ "$PORTABLE" = 1 ] || allowed_deps="$allowed_deps|$BUNDLE/"
+allowed_deps="$allowed_deps)"
 outside=$(for f in "$PREFIX"/lib/wine/x86_64-unix/*.so "$PREFIX"/bin/wine*; do
               [ -f "$f" ] && otool -L "$f" 2>/dev/null | tail -n +2 | awk -v f="${f##*/}" '{print f": "$1}'
-          done | grep -v -E ": (/usr/lib/|/System/|@rpath/|$BUNDLE/)" | sort -u || true)
+          done | grep -v -E "$allowed_deps" | sort -u || true)
 [ -z "$outside" ] || die "Unix-side modules link libraries outside the bundle:
 $outside"
 info "  every Unix-side module links only the system and lib/bundled"
@@ -457,6 +482,7 @@ if [ -n "$TARBALL" ] && [ -f "$TARBALL" ]; then
 fi
 {
     echo "runtime:           $NAME"
+    echo "portable_sonames:  $PORTABLE"
     [ "$MODE" = winecx ] && echo "crossover_version: $CXVER"
     echo "wine_version:      ${wine_version:-unknown}"
     echo "wine_reported:     ${ver:-unknown}"
