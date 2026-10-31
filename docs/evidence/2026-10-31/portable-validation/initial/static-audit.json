@@ -1,0 +1,30 @@
+{
+  "mach_o_files": 122,
+  "issues": [
+    [
+      "/private/tmp/TFA portable validation 1xicnaej/runtime/lib/bundled/libgirepository-2.0.0.dylib",
+      "unexpected link",
+      "/Users/tailblues/tfa-release-repro/wine-workbench-macos/toolchains/gstreamer-1.28.7-x86_64/lib/libgirepository-2.0.0.dylib"
+    ],
+    [
+      "/private/tmp/TFA portable validation 1xicnaej/runtime/lib/bundled/libgirepository-2.0.0.dylib",
+      "unexpected link",
+      "/Users/tailblues/tfa-release-repro/wine-workbench-macos/toolchains/gstreamer-1.28.7-x86_64/lib/libglib-2.0.0.dylib"
+    ],
+    [
+      "/private/tmp/TFA portable validation 1xicnaej/runtime/lib/bundled/libgirepository-2.0.0.dylib",
+      "unexpected link",
+      "/Users/tailblues/tfa-release-repro/wine-workbench-macos/toolchains/gstreamer-1.28.7-x86_64/lib/libgobject-2.0.0.dylib"
+    ],
+    [
+      "/private/tmp/TFA portable validation 1xicnaej/runtime/lib/bundled/libgirepository-2.0.0.dylib",
+      "unexpected link",
+      "/Users/tailblues/tfa-release-repro/wine-workbench-macos/toolchains/gstreamer-1.28.7-x86_64/lib/libgmodule-2.0.0.dylib"
+    ],
+    [
+      "/private/tmp/TFA portable validation 1xicnaej/runtime/lib/bundled/libgirepository-2.0.0.dylib",
+      "unexpected link",
+      "/Users/tailblues/tfa-release-repro/wine-workbench-macos/toolchains/gstreamer-1.28.7-x86_64/lib/libffi.7.dylib"
+    ]
+  ]
+}

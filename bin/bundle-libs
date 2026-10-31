@@ -266,10 +266,7 @@ if [ -d "$GST/lib/gstreamer-1.0" ]; then
         done < <(otool -l "$f" | awk '/LC_RPATH/{getline; getline; print $2}' | grep "^$GST" || true)
         codesign --force -s - "$f" >/dev/null 2>&1 || true
     }
-    for f in "$DEST"/libgst*.dylib "$DEST"/libglib*.dylib "$DEST"/libgobject*.dylib \
-             "$DEST"/libgmodule*.dylib "$DEST"/libgio*.dylib "$DEST"/libgthread*.dylib \
-             "$DEST"/libffi*.dylib "$DEST"/libpcre2*.dylib "$DEST"/*-gst.*.dylib \
-             "$DEST"/liborc*.dylib "$DEST"/libz*.dylib "$DEST/gst-plugin-scanner"; do
+    for f in "$DEST"/*.dylib "$DEST/gst-plugin-scanner"; do
         [ -f "$f" ] && [ ! -L "$f" ] || continue
         case "$f" in *.dylib) install_name_tool -id "@loader_path/$(basename "$f")" "$f" 2>/dev/null ;; esac
         relink "$f" "@loader_path/"
@@ -282,8 +279,7 @@ if [ -d "$GST/lib/gstreamer-1.0" ]; then
     done
 
     # Assert: nothing in the GStreamer bundle still points at the toolchain.
-    left=$(for f in "$DEST"/gstreamer-1.0/*.dylib "$DEST"/libgst*.dylib "$DEST"/libglib*.dylib \
-                    "$DEST"/libgobject*.dylib "$DEST/gst-plugin-scanner"; do
+    left=$(for f in "$DEST"/gstreamer-1.0/*.dylib "$DEST"/*.dylib "$DEST/gst-plugin-scanner"; do
                [ -f "$f" ] && [ ! -L "$f" ] && otool -L "$f" | tail -n +2 | awk '{print $1}'
            done | grep -E "^$GST|^/usr/local|^/opt/homebrew" | sort -u || true)
     [ -z "$left" ] || die "GStreamer bundle still references outside paths:

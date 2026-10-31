@@ -8,6 +8,58 @@
 
 
 
+## 2026-10-31 — Portable gameplay confirmed; release candidate packaging
+
+User confirmed museum and first minutes of mission play as good as before,
+including audio/loading transitions. Running game loaded relocated Wine,
+Mesa/Zink, KosmicKrisp and WASAPI; lsof snapshot found no Homebrew or original
+repository libraries. sandbox-exec continued denying those roots. This completes
+the isolated gameplay milestone on this host, not another-Mac qualification.
+
+Packaging a private preview candidate with docs, checksums, setup/launch wrapper
+and source snapshots. Workbench remote is public; graphics remote private, so
+release assets belong on the private graphics repository. New setup wrapper's
+cold first-run behavior and complete redistribution/source-license inventory
+must be reviewed before promoting the draft. Never upload the private play-prefix.
+
+## 2026-10-31 — Relocated media and TLS checks
+
+Measured with original repositories/Homebrew blocked: TFA SplashScreen.mp4
+read through Wine Media Foundation decoded 30 NV12 frames; nonexistent media
+failed. This exercises the corrected winegstreamer module after removing its
+old LC_RPATH. WinHTTP HTTPS request to store.steampowered.com/about initially
+failed with error 12157. Traced retry completed a GnuTLS handshake and HTTP 200
+with 1024 response bytes; three further untraced repeats also passed. Cause of
+first failure remains unresolved, not attributed to packaging or the network.
+Evidence: docs/evidence/2026-10-31/portable-validation/media-network/.
+
+User closed Steam. Created a private APFS copy of the installed bottle under
+/private/tmp beside the relocated runtime for gameplay. This contains private
+Steam state and must never be included in a release archive. No new game
+playback result yet; the existing playable bottle remains unchanged.
+
+## 2026-10-31 — Portable candidate isolated validation
+
+Measured: portable build completed exit 0. Copied runtime and graphics to an
+unrelated /private/tmp path containing spaces. sandbox-exec denied reads from
+both Homebrew roots and all original/reproduction repositories; a cat control
+failed with Operation not permitted. Fresh wineboot succeeded. Swap probe passed
+49 checks; wrong-expected, absent bridge and Apple control returned expected
+statuses. Repeated after correcting the dependency bundle, with identical results.
+
+Full Mach-O link/symlink audit found libgirepository retaining four toolchain
+links plus its install ID. bundle-libs now rewrites and checks all root dylibs,
+rather than an incomplete name list. Rebundled audit: 122 Mach-O files, no flagged
+links/symlinks. All 74 unique bundled dylibs/plugins dlopen under isolation.
+A subsequent LC_RPATH audit found winegstreamer's old GStreamer toolchain path;
+removed from build recipe and candidate, then re-signed. That last binary edit
+has not yet undergone media playback validation. Native load is not proof of
+TLS transactions, decoding, audio playback, or general Wine compatibility.
+
+Evidence/scripts: docs/evidence/2026-10-31/portable-validation/. Final archive,
+full dynamic-load tracing, media/TLS tests, packaged gameplay and another-Mac
+validation remain pending. Existing playable runtime/prefix remain unchanged.
+
 ## 2026-10-31 — Fresh C: installation completed a normal mission
 
 **User report:** played fully normally; entering 3D took some moments and was the

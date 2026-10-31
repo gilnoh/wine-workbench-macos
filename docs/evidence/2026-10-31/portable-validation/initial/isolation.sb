@@ -1,0 +1,6 @@
+(version 1) (allow default)
+(deny file-read* (subpath "/usr/local"))
+(deny file-read* (subpath "/opt/homebrew"))
+(deny file-read* (subpath "/Users/tailblues/tfa-release-repro"))
+(deny file-read* (subpath "/Users/tailblues/mesa-wine-gl"))
+(deny file-read* (subpath "/Users/tailblues/wine-workbench-macos"))

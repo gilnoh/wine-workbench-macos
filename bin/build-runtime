@@ -433,6 +433,10 @@ while read -r d; do
     [ "$PORTABLE" != 1 ] || target="@loader_path/../../bundled/$b"
     install_name_tool -change "$d" "$target" "$ws"
 done < <(otool -L "$ws" | tail -n +2 | awk '{print $1}')
+# Remove the configure-time GStreamer search directory after rewriting links.
+while IFS= read -r r; do
+    case "$r" in "$GST"/*) install_name_tool -delete_rpath "$r" "$ws" ;; esac
+done < <(otool -l "$ws" | awk '/LC_RPATH/{getline; getline; print $2}')
 codesign --force -s - "$ws" >/dev/null 2>&1 || die "cannot sign winegstreamer.so"
 
 # Assert: no Unix-side module links anything outside the system and the bundle.

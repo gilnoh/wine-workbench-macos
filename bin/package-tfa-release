@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+"""Stage the TFA preview from explicit distributable inputs; never include bottles."""
+import argparse,hashlib,json,os,shutil,subprocess
+from pathlib import Path
+p=argparse.ArgumentParser(description=__doc__);p.add_argument('output',type=Path);a=p.parse_args()
+wb=Path(__file__).resolve().parent.parent;gl=wb.parent/'mesa-wine-gl';out=a.output.resolve()
+if out.exists():raise SystemExit('Output must not exist: '+str(out))
+out.mkdir(parents=True)
+def copy(src,dst):
+ if src.is_dir():shutil.copytree(src,dst,symlinks=True)
+ else:shutil.copy2(src,dst)
+rt=wb/'runtimes/winecx-26.3.0-tfa-portable-x86_64'
+copy(rt,out/'runtime');copy(gl/'build/graphics-bundle-swap-fix',out/'graphics')
+copy(wb/'release/tfa',out/'tfa');(out/'tools').mkdir();(out/'docs').mkdir();(out/'licenses').mkdir();(out/'provenance').mkdir()
+copy(wb/'bin/vendor/winetricks',out/'tools/winetricks')
+assert hashlib.sha256((out/'tools/winetricks').read_bytes()).hexdigest()=='954d17f56ae5f4d32eb083193a4a838c73ae5ff6b91765d93b0eab59cf2e7d29'
+copy(Path('/opt/homebrew/bin/cabextract').resolve(),out/'tools/cabextract')
+for f in ['TFA-RELEASE.md','TFA-BUILD.md']:copy(wb/'docs'/f,out/'docs'/f)
+copy(wb/'docs/TFA-RELEASE.md',out/'README.md')
+for f in ['host-toolchain.json','build-steps.json','checkpoints.json']:copy(wb.parent/f,out/'provenance'/f)
+# Retain every installed dependency license/recipe/receipt for the relevant
+# Homebrew formulae. GStreamer subproject notices are retained separately.
+formulae=['molten-vk','vulkan-loader','freetype','gnutls','sdl2','gmp','nettle','libtasn1','libunistring','libidn2','p11-kit','libpng','gettext','libevent','unbound','openssl@3','zstd']
+for cellar,names in [(Path('/usr/local/Cellar'),formulae),(Path('/opt/homebrew/Cellar'),['cabextract'])]:
+ for name in names:
+  versions=list((cellar/name).glob('*'))
+  for version in versions:
+   dest=out/'licenses'/('homebrew-'+name+'-'+version.name);dest.mkdir()
+   for f in version.rglob('*'):
+    if f.is_file() and (f.name.upper().startswith(('LICENSE','COPYING','COPYRIGHT','NOTICE','AUTHORS')) or f.name=='INSTALL_RECEIPT.json' or '.brew' in f.parts):
+     rel=f.relative_to(version);(dest/rel).parent.mkdir(parents=True,exist_ok=True);shutil.copy2(f,dest/rel)
+for name,src in [('wine',gl/'src/winecx-bridge/sources/wine'),('mesa',gl/'src/mesa'),('gstreamer',wb/'src/gstreamer')]:
+ for f in src.rglob('*'):
+  if '.git' in f.parts or not f.is_file():continue
+  if f.name.upper().startswith(('LICENSE','COPYING','COPYRIGHT','NOTICE')):
+   dest=out/'licenses'/name/f.relative_to(src);dest.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(f,dest)
+# Winetricks includes its LGPL license notice in the script itself.
+repos={name:{'commit':subprocess.check_output(['git','-C',str(path),'rev-parse','HEAD'],text=True).strip(),'repository':subprocess.check_output(['git','-C',str(path),'remote','get-url','origin'],text=True).strip()} for name,path in [('wine-workbench-macos',wb),('mesa-wine-gl',gl)]}
+files={};links={}
+for f in sorted(out.rglob('*')):
+ if f.is_symlink():
+  if not f.resolve().is_relative_to(out):raise SystemExit('External symlink: '+str(f))
+  links[str(f.relative_to(out))]=os.readlink(f)
+ elif f.is_file():files[str(f.relative_to(out))]=hashlib.sha256(f.read_bytes()).hexdigest()
+(out/'release-manifest.json').write_text(json.dumps({'name':'TFA playable preview 1','repositories':repos,'upstreams':json.loads((gl/'sources.lock.json').read_text()),'files_sha256':files,'symlinks':links,'status':'Private release candidate; cold setup and second-host validation pending'},indent=2)+'\n')
+print(out)

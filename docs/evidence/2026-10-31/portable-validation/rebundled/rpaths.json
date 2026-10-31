@@ -1,0 +1,130 @@
+[
+  {
+    "file": "runtime/lib/wine/x86_64-unix/bcrypt.so",
+    "rpath": "path @loader_path/ (offset 12)"
+  },
+  {
+    "file": "runtime/lib/wine/x86_64-unix/opengl32.so",
+    "rpath": "path @loader_path/ (offset 12)"
+  },
+  {
+    "file": "runtime/lib/wine/x86_64-unix/kerberos.so",
+    "rpath": "path @loader_path/ (offset 12)"
+  },
+  {
+    "file": "runtime/lib/wine/x86_64-unix/winebus.so",
+    "rpath": "path @loader_path/ (offset 12)"
+  },
+  {
+    "file": "runtime/lib/wine/x86_64-unix/winecoreaudio.so",
+    "rpath": "path @loader_path/ (offset 12)"
+  },
+  {
+    "file": "runtime/lib/wine/x86_64-unix/opencl.so",
+    "rpath": "path @loader_path/ (offset 12)"
+  },
+  {
+    "file": "runtime/lib/wine/x86_64-unix/wineps.so",
+    "rpath": "path @loader_path/ (offset 12)"
+  },
+  {
+    "file": "runtime/lib/wine/x86_64-unix/dnsapi.so",
+    "rpath": "path @loader_path/ (offset 12)"
+  },
+  {
+    "file": "runtime/lib/wine/x86_64-unix/crypt32.so",
+    "rpath": "path @loader_path/ (offset 12)"
+  },
+  {
+    "file": "runtime/lib/wine/x86_64-unix/msv1_0.so",
+    "rpath": "path @loader_path/ (offset 12)"
+  },
+  {
+    "file": "runtime/lib/wine/x86_64-unix/wpcap.so",
+    "rpath": "path @loader_path/ (offset 12)"
+  },
+  {
+    "file": "runtime/lib/wine/x86_64-unix/winemac.so",
+    "rpath": "path @loader_path/ (offset 12)"
+  },
+  {
+    "file": "runtime/lib/wine/x86_64-unix/netapi32.so",
+    "rpath": "path @loader_path/ (offset 12)"
+  },
+  {
+    "file": "runtime/lib/wine/x86_64-unix/ctapi32.so",
+    "rpath": "path @loader_path/ (offset 12)"
+  },
+  {
+    "file": "runtime/lib/wine/x86_64-unix/avicap32.so",
+    "rpath": "path @loader_path/ (offset 12)"
+  },
+  {
+    "file": "runtime/lib/wine/x86_64-unix/ntdll.so",
+    "rpath": "path @loader_path/ (offset 12)"
+  },
+  {
+    "file": "runtime/lib/wine/x86_64-unix/ws2_32.so",
+    "rpath": "path @loader_path/ (offset 12)"
+  },
+  {
+    "file": "runtime/lib/wine/x86_64-unix/winedmo.so",
+    "rpath": "path @loader_path/ (offset 12)"
+  },
+  {
+    "file": "runtime/lib/wine/x86_64-unix/winspool.so",
+    "rpath": "path @loader_path/ (offset 12)"
+  },
+  {
+    "file": "runtime/lib/wine/x86_64-unix/localspl.so",
+    "rpath": "path @loader_path/ (offset 12)"
+  },
+  {
+    "file": "runtime/lib/wine/x86_64-unix/winegstreamer.so",
+    "rpath": "path @loader_path/ (offset 12)"
+  },
+  {
+    "file": "runtime/lib/wine/x86_64-unix/winegstreamer.so",
+    "rpath": "path /Users/tailblues/tfa-release-repro/wine-workbench-macos/toolchains/gstreamer-1.28.7-x86_64/lib (offset 12)"
+  },
+  {
+    "file": "runtime/lib/wine/x86_64-unix/win32u.so",
+    "rpath": "path @loader_path/ (offset 12)"
+  },
+  {
+    "file": "runtime/lib/wine/x86_64-unix/nsiproxy.so",
+    "rpath": "path @loader_path/ (offset 12)"
+  },
+  {
+    "file": "runtime/lib/wine/x86_64-unix/dwrite.so",
+    "rpath": "path @loader_path/ (offset 12)"
+  },
+  {
+    "file": "runtime/lib/wine/x86_64-unix/winscard.so",
+    "rpath": "path @loader_path/ (offset 12)"
+  },
+  {
+    "file": "runtime/lib/wine/x86_64-unix/secur32.so",
+    "rpath": "path @loader_path/ (offset 12)"
+  },
+  {
+    "file": "runtime/lib/wine/x86_64-unix/winebth.so",
+    "rpath": "path @loader_path/ (offset 12)"
+  },
+  {
+    "file": "runtime/lib/wine/x86_64-unix/odbc32.so",
+    "rpath": "path @loader_path/ (offset 12)"
+  },
+  {
+    "file": "runtime/lib/wine/x86_64-unix/mountmgr.so",
+    "rpath": "path @loader_path/ (offset 12)"
+  },
+  {
+    "file": "runtime/lib/wine/x86_64-unix/winevulkan.so",
+    "rpath": "path @loader_path/ (offset 12)"
+  },
+  {
+    "file": "runtime/lib/wine/x86_64-unix/qcap.so",
+    "rpath": "path @loader_path/ (offset 12)"
+  }
+]

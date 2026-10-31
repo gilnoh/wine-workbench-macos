@@ -1,0 +1,27 @@
+[
+  {
+    "mode": "bootstrap",
+    "status": 0,
+    "passed": true
+  },
+  {
+    "mode": "positive",
+    "status": 0,
+    "passed": true
+  },
+  {
+    "mode": "wrong-expected",
+    "status": 1,
+    "passed": true
+  },
+  {
+    "mode": "missing-bridge",
+    "status": 2,
+    "passed": true
+  },
+  {
+    "mode": "apple-control",
+    "status": 2,
+    "passed": true
+  }
+]

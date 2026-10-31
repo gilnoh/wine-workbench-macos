@@ -1,0 +1,17 @@
+[
+  {
+    "test": "https",
+    "exit_status": 1,
+    "passed": false
+  },
+  {
+    "test": "media",
+    "exit_status": 0,
+    "passed": true
+  },
+  {
+    "test": "missing-media",
+    "exit_status": 1,
+    "passed": true
+  }
+]

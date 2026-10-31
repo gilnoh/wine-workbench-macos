@@ -1,0 +1,1 @@
+cat: /Users/tailblues/tfa-release-repro/wine-workbench-macos/AGENT_START_HERE.md: Operation not permitted

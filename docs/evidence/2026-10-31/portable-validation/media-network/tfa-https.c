@@ -1,0 +1,4 @@
+#include <windows.h>
+#include <winhttp.h>
+#include <stdio.h>
+int main(void){HINTERNET s=WinHttpOpen(L"TFA portability probe",WINHTTP_ACCESS_TYPE_NO_PROXY,0,0,0);if(!s)return 1;WinHttpSetTimeouts(s,15000,15000,15000,15000);HINTERNET c=WinHttpConnect(s,L"store.steampowered.com",443,0);HINTERNET r=WinHttpOpenRequest(c,L"GET",L"/about/",0,0,0,WINHTTP_FLAG_SECURE);if(!r||!WinHttpSendRequest(r,0,0,0,0,0,0)||!WinHttpReceiveResponse(r,0)){printf("FAIL error=%lu\n",GetLastError());return 1;}DWORD status=0,n=sizeof(status),got=0;char b[1024];WinHttpQueryHeaders(r,WINHTTP_QUERY_STATUS_CODE|WINHTTP_QUERY_FLAG_NUMBER,0,&status,&n,0);BOOL ok=WinHttpReadData(r,b,sizeof(b),&got);printf("HTTPS status=%lu bytes=%lu read=%d\n",status,got,ok);WinHttpCloseHandle(r);WinHttpCloseHandle(c);WinHttpCloseHandle(s);return status==200&&ok&&got>0?0:1;}
