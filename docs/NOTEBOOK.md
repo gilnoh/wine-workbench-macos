@@ -8,6 +8,14 @@
 
 
 
+
+## 2026-11-01 — Public source preparation and binary distribution blocker
+
+User requested public source/history publication of both projects, including the existing full desktop screenshots. Added the connected source-build guide, explicit GL host provisioning, and source-build versus release-maintainer packaging boundaries. No runtime/game code changes and no new gameplay claim in this documentation pass. The new source snapshot is tagged `tfa-source-preview-1` in both repositories.
+
+User report from downloaded separate-account testing: repeated macOS security approvals for individual components make the binary unsuitable for general release. Measured signing inspection: Wine executable unsigned; Mesa bridge ad-hoc signed without a Team ID. Developer ID signing/notarization is deferred by agreement. Keep the binary release a draft; public source availability is a separate milestone. Earlier portable museum/mission and cold setup results remain historical evidence, not proof of a signed download experience.
+
+
 ## 2026-10-31 — rc2 ready for separate-user acceptance
 
 Final rc2 extraction verified all4,276 file hashes and48 symlinks. Runtime,

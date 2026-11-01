@@ -10,7 +10,14 @@
 set -uo pipefail
 
 CHECK=0
-[ "${1:-}" = "--check" ] && CHECK=1
+GL=0
+for arg in "$@"; do
+    case "$arg" in
+        --check) CHECK=1 ;;
+        --gl) GL=1 ;;
+        *) echo "usage: provision-host [--check] [--gl]" >&2; exit 2 ;;
+    esac
+done
 
 BREW_X86=/usr/local/bin/brew
 BREW_ARM=/opt/homebrew/bin/brew
@@ -32,6 +39,10 @@ PKGS_X86="molten-vk vulkan-loader freetype gnutls bison mingw-w64 sdl2 sdl3"
 #                llvm-pdbutil/-undname for Unity symbols (/opt/homebrew/opt/llvm)
 #   mingw-w64    tools/probes and tools/fixes (/opt/homebrew/bin/*-mingw32-gcc)
 PKGS_ARM="cabextract ninja pkgconf llvm mingw-w64"
+# Mesa/Zink/KosmicKrisp compiler and shader-tool dependencies.
+if [ "$GL" = 1 ]; then
+    PKGS_X86="$PKGS_X86 python@3.14 llvm pkgconf spirv-tools spirv-headers spirv-llvm-translator libclc vulkan-headers zstd ninja glslang"
+fi
 
 fail=0
 note() { printf "  %-52s %s\n" "$1" "$2"; }

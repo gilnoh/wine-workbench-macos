@@ -31,6 +31,7 @@ assert git(mesa/'src/mesa','rev-parse','HEAD')==lock['mesa']['commit']
 assert git(wb/'src/gstreamer','rev-parse','HEAD')=='070125524a8422e29d3b69a372ed4f62fd343ffa'
 archive=root/'downloads/crossover-sources-26.3.0.tar.gz'
 assert hashlib.sha256(archive.read_bytes()).hexdigest()=='ac99c8ca4b3848f3e81784135f023df266b61c2345726ea55a50b3e030dd6872'
+run('host-check.log',[wb/'bin/provision-host','--check','--gl'])
 winesrc=mesa/'src/winecx-bridge'
 assert not winesrc.exists(), 'Use a fresh Wine source destination for this clean build'
 winesrc.mkdir()
@@ -52,7 +53,6 @@ for line in (mesa/'patches/series').read_text().splitlines():
     if line.strip() and not line.startswith('#'):
         _,name=line.split()
         run('apply-'+Path(name).name+'.log',['git','-C',mesa/'src/mesa-xfb','apply',mesa/'patches'/name])
-run('host-check.log',[wb/'bin/provision-host','--check'])
 run('gstreamer.log',[wb/'bin/build-gstreamer'])
 run('kosmickrisp.log',[mesa/'bin/build-kk-experiment'],mesa)
 run('bridge.log',[mesa/'bin/build-bridge'],mesa)

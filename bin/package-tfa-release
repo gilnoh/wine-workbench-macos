@@ -15,7 +15,7 @@ copy(wb/'release/tfa',out/'tfa');(out/'tools').mkdir();(out/'docs').mkdir();(out
 copy(wb/'bin/vendor/winetricks',out/'tools/winetricks')
 assert hashlib.sha256((out/'tools/winetricks').read_bytes()).hexdigest()=='954d17f56ae5f4d32eb083193a4a838c73ae5ff6b91765d93b0eab59cf2e7d29'
 copy(Path('/opt/homebrew/bin/cabextract').resolve(),out/'tools/cabextract')
-for f in ['TFA-RELEASE.md','TFA-BUILD.md','TFA-SEPARATE-USER-TEST.md']:copy(wb/'docs'/f,out/'docs'/f)
+for f in ['TFA-RELEASE.md','TFA-BUILD.md','TFA-SEPARATE-USER-TEST.md','BUILD-GL-WINE.md']:copy(wb/'docs'/f,out/'docs'/f)
 (out/'README.md').write_text((wb/'docs/TFA-RELEASE.md').read_text().replace('](TFA-BUILD.md)', '](docs/TFA-BUILD.md)').replace('](TFA-SEPARATE-USER-TEST.md)', '](docs/TFA-SEPARATE-USER-TEST.md)'))
 for f in ['host-toolchain.json','build-steps.json','checkpoints.json']:copy(wb.parent/f,out/'provenance'/f)
 # Retain every installed dependency license/recipe/receipt for the relevant

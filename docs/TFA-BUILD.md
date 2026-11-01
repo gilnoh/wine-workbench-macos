@@ -1,6 +1,6 @@
 # Rebuild and package the TFA preview
 
-The release assets include exact workbench and mesa-wine-gl Git bundles and upstream source archives. `release-manifest.json` records their commit IDs, upstream revisions, and file hashes. Private repository access is needed for GitHub source links. Source snapshots allow inspection without relying on mutable branch names.
+The release assets include exact workbench and mesa-wine-gl Git bundles and upstream source archives. `release-manifest.json` records their commit IDs, upstream revisions, and file hashes. For the public source workflow, start with [BUILD-GL-WINE.md](BUILD-GL-WINE.md). Source snapshots allow inspection without relying on mutable branch names.
 
 ## Clean source build
 
@@ -11,7 +11,7 @@ git clone https://github.com/gilnoh/wine-workbench-macos.git
 git clone https://github.com/gilnoh/mesa-wine-gl.git
 # Check out the exact commits from release-manifest.json in each clone.
 cd wine-workbench-macos
-bin/provision-host
+bin/provision-host --gl
 bin/fetch-tfa-sources
 bin/rebuild-tfa-local
 ```
@@ -32,6 +32,8 @@ bin/build-runtime --winecx 26.3.0 --pe-gcc --portable \
 `--portable` seeds module-relative dlopen names, rewrites media-library links, removes the build-time GStreamer rpath and re-signs changed binaries. All vendor changes must remain in the declared patch series. Never repair deployment by adding DYLD_FALLBACK_LIBRARY_PATH.
 
 ## Package and verify
+
+The current packager is a release-maintainer tool tied to the recorded host inventory, not a generic fresh-host installer. It expects `../host-toolchain.json`, `../build-steps.json` and `../checkpoints.json`, plus the exact dependency kegs named in `tools/release/collect-sources.py`. Capture the new build's actual inventory/checkpoints; never copy historical provenance to claim a different build. Adapting and verifying these inputs is required on another host. Local gameplay through the guide above does not require packaging.
 
 Run `bin/package-tfa-release OUTPUT_DIRECTORY`. It copies only the named runtime, graphics bundle, launcher, setup tools, documentation and provenance. It must never copy prefixes, Steam caches, credentials, games or downloaded proprietary installers. Output is a candidate until tested after extraction at another path.
 

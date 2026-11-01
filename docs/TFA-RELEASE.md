@@ -6,12 +6,12 @@ This is an experimental Wine + Mesa/Zink + KosmicKrisp runtime for Apple Silicon
 
 Apple Silicon, Rosetta 2, Metal-capable macOS, internet access, and a Steam account owning Task Force Admiral. The actual validation host was an M1 Max on macOS 27.0.1 (26A434). Other Macs/macOS versions are not yet qualified. No Homebrew, Xcode, compiler or Python is intended to be required to use the binary package. Build tools are required only for rebuilding it.
 
-The runtime passed relocated/isolation tests, and the user confirmed museum and mission play with clear audio and normal loading transitions. First entry into 3D can take time. The packaged first-run setup passed with an empty bottle and download cache under dependency isolation. The separate-user acceptance test is still pending.
+The runtime passed relocated/isolation tests, and the user confirmed museum and mission play with clear audio and normal loading transitions. First entry into 3D can take time. The packaged first-run setup passed with an empty bottle and download cache under dependency isolation. Consult docs/NOTEBOOK.md in the source repository for the current acceptance and signing status.
 
 ## Install and play
 
-1. Download the binary archive and SHA256SUMS from the private release. Verify with `shasum -a 256 -c SHA256SUMS` (download all listed assets, or check the selected archive's line). Extract the archive to a permanent, writable folder.
-2. Install Rosetta if macOS requests it. This preview is ad-hoc signed, not Apple notarized. Review the sources/checksums before allowing it in macOS security settings. Do not disable Gatekeeper globally.
+1. Download the binary archive and SHA256SUMS from the maintainer-provided draft release. Verify with `shasum -a 256 -c SHA256SUMS` (download all listed assets, or check the selected archive's line). Extract the archive to a permanent, writable folder.
+2. Install Rosetta if macOS requests it. This preview is not Developer ID signed or Apple notarized; its Wine executable is unsigned and some native libraries are ad-hoc signed. Downloaded copies can trigger repeated component-level security prompts. Review the sources/checksums before allowing it in macOS security settings. Do not disable Gatekeeper globally.
 3. Open Terminal in the extracted folder and run `./tfa setup`. This creates a fresh bottle and downloads Microsoft prerequisites, fonts, and Steam. Their respective license terms apply. No Steam credentials or game files ship here.
 4. Run `./tfa steam`, log in, and install TFA in Steam's default **C:** library. Do not run another Windows Steam client at the same time.
 5. Leave Steam open. In a second Terminal in the package folder, run `./tfa play`. Use windowed mode in the game if fullscreen clips the menu.

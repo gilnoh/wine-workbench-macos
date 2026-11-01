@@ -1,5 +1,7 @@
 # wine-workbench-macos
 
+**Build the complete GL gaming environment:** [two-repository guide](docs/BUILD-GL-WINE.md). Includes prerequisites, clean build, Steam/TFA setup and an AI-agent handoff.
+
 **Play your favourite Windows games on a Mac — and hack on the thing that runs them
 while you do.**
 
