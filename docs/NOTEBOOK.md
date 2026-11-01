@@ -9,6 +9,11 @@
 
 
 
+## 2026-11-01 — GL-support-wine release identity
+
+Renamed the release product, packaging command, launcher and maintained release guides to GL-support-wine. TFA remains a tested game/example only. Existing legacy bottles and TFA_PREFIX overrides are preserved; new bottles use GL-support-wine. RC3 retains the tested Wine/graphics binaries and changes launcher/docs/metadata, so this does not claim a fresh game acceptance test or resolve signing. Historical evidence filenames and source tags remain unchanged.
+
+
 ## 2026-11-01 — Public source preparation and binary distribution blocker
 
 User requested public source/history publication of both projects, including the existing full desktop screenshots. Added the connected source-build guide, explicit GL host provisioning, and source-build versus release-maintainer packaging boundaries. No runtime/game code changes and no new gameplay claim in this documentation pass. The new source snapshot is tagged `tfa-source-preview-1` in both repositories.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage the TFA preview from explicit distributable inputs; never include bottles."""
+"""Stage GL-support-wine from explicit distributable inputs; never include bottles."""
 import argparse,hashlib,json,os,shutil,subprocess,sys
 from pathlib import Path
 p=argparse.ArgumentParser(description=__doc__);p.add_argument('output',type=Path);a=p.parse_args()
@@ -11,12 +11,12 @@ def copy(src,dst):
  else:shutil.copy2(src,dst)
 rt=wb/'runtimes/winecx-26.3.0-tfa-portable-x86_64'
 copy(rt,out/'runtime');copy(gl/'build/graphics-bundle-swap-fix',out/'graphics')
-copy(wb/'release/tfa',out/'tfa');(out/'tools').mkdir();(out/'docs').mkdir();(out/'licenses').mkdir();(out/'provenance').mkdir()
+copy(wb/'release/gl-support-wine',out/'gl-support-wine');(out/'tools').mkdir();(out/'docs').mkdir();(out/'licenses').mkdir();(out/'provenance').mkdir()
 copy(wb/'bin/vendor/winetricks',out/'tools/winetricks')
 assert hashlib.sha256((out/'tools/winetricks').read_bytes()).hexdigest()=='954d17f56ae5f4d32eb083193a4a838c73ae5ff6b91765d93b0eab59cf2e7d29'
 copy(Path('/opt/homebrew/bin/cabextract').resolve(),out/'tools/cabextract')
-for f in ['TFA-RELEASE.md','TFA-BUILD.md','TFA-SEPARATE-USER-TEST.md','BUILD-GL-WINE.md']:copy(wb/'docs'/f,out/'docs'/f)
-(out/'README.md').write_text((wb/'docs/TFA-RELEASE.md').read_text().replace('](TFA-BUILD.md)', '](docs/TFA-BUILD.md)').replace('](TFA-SEPARATE-USER-TEST.md)', '](docs/TFA-SEPARATE-USER-TEST.md)'))
+for f in ['GL-SUPPORT-WINE.md','GL-SUPPORT-WINE-BUILD.md','GL-SUPPORT-WINE-ACCEPTANCE.md','BUILD-GL-WINE.md']:copy(wb/'docs'/f,out/'docs'/f)
+(out/'README.md').write_text((wb/'docs/GL-SUPPORT-WINE.md').read_text().replace('](GL-SUPPORT-WINE-BUILD.md)', '](docs/GL-SUPPORT-WINE-BUILD.md)').replace('](GL-SUPPORT-WINE-ACCEPTANCE.md)', '](docs/GL-SUPPORT-WINE-ACCEPTANCE.md)'))
 for f in ['host-toolchain.json','build-steps.json','checkpoints.json']:copy(wb.parent/f,out/'provenance'/f)
 # Retain every installed dependency license/recipe/receipt for the relevant
 # Homebrew formulae. GStreamer subproject notices are retained separately.
@@ -44,5 +44,5 @@ for f in sorted(out.rglob('*')):
   if not f.resolve().is_relative_to(out):raise SystemExit('External symlink: '+str(f))
   links[str(f.relative_to(out))]=os.readlink(f)
  elif f.is_file():files[str(f.relative_to(out))]=hashlib.sha256(f.read_bytes()).hexdigest()
-(out/'release-manifest.json').write_text(json.dumps({'name':'TFA playable preview 1','repositories':repos,'upstreams':json.loads((gl/'sources.lock.json').read_text()),'files_sha256':files,'symlinks':links,'status':'Private rc2 candidate; cold setup passed; separate-user acceptance pending'},indent=2)+'\n')
+(out/'release-manifest.json').write_text(json.dumps({'name':'GL-support-wine preview 1 rc3','repositories':repos,'upstreams':json.loads((gl/'sources.lock.json').read_text()),'files_sha256':files,'symlinks':links,'status':'Draft rc3; renamed launcher requires acceptance; Developer ID signing and notarization pending'},indent=2)+'\n')
 print(out)

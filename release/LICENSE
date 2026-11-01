@@ -2,7 +2,7 @@ MIT License
 
 Copyright (c) 2026 wine-workbench-macos contributors
 
-This license applies to release/tfa, bin/package-tfa-release and tools/release/*.py. It does not replace the licenses of Wine, Mesa, dependency libraries or other project files.
+This license applies to release/gl-support-wine, bin/package-gl-support-wine and tools/release/*.py. It does not replace the licenses of Wine, Mesa, dependency libraries or other project files.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 

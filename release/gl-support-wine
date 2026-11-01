@@ -2,7 +2,11 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 export PATH="$ROOT/tools:$ROOT/runtime/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-export WINEPREFIX="${TFA_PREFIX:-$HOME/Library/Application Support/TFA Wine Preview/prefix}"
+# Explicit new override, legacy override, existing legacy bottle, then new default.
+legacy_prefix="$HOME/Library/Application Support/TFA Wine Preview/prefix"
+default_prefix="$HOME/Library/Application Support/GL-support-wine/prefix"
+if [ -d "$legacy_prefix" ]; then default_prefix="$legacy_prefix"; fi
+export WINEPREFIX="${GL_WINE_PREFIX:-${TFA_PREFIX:-$default_prefix}}"
 export WINE="$ROOT/runtime/bin/wine" WINESERVER="$ROOT/runtime/bin/wineserver"
 for key in $(compgen -e); do case "$key" in DYLD_*|MESA_*|VK_*|ZINK_*|ALSOFT_*|GST_*) unset "$key";; esac; done
 export WINEMSYNC=1 WINEDEBUG="${WINEDEBUG:--all}"
@@ -41,16 +45,16 @@ case "${1:-help}" in
   echo "7d3654531c32d941b8cae81c4137fc542172bfa9635f169cb392f245a0a12bcb  $W_CACHE/SteamSetup.exe" | shasum -a 256 -c -
   "$WINE" "$W_CACHE/SteamSetup.exe" /S
  fi
- echo 'Setup complete. Run ./tfa steam, log in, and install TFA in the default C: library.'
+ echo 'Setup complete. Run ./gl-support-wine steam, log in, and install a game. For the tested TFA example, use the default C: library.'
  ;;
  steam)
  check_other_steam
- [ -f "$STEAM/steam.exe" ] || { echo 'Run ./tfa setup first'; exit 1; }
+ [ -f "$STEAM/steam.exe" ] || { echo 'Run ./gl-support-wine setup first'; exit 1; }
  cd "$STEAM"; exec "$WINE" "$STEAM/steam.exe"
  ;;
- play)
+ play-tfa|play)
  check_other_steam
- /usr/bin/pgrep -x steam.exe >/dev/null || { echo 'Run ./tfa steam first and wait for login.'; exit 1; }
+ /usr/bin/pgrep -x steam.exe >/dev/null || { echo 'Run ./gl-support-wine steam first and wait for login.'; exit 1; }
  game="$STEAM/steamapps/common/Task Force Admiral/bin/master"
  [ -f "$game/TFA.exe" ] || { echo 'Install TFA into the default C: Steam library first.'; exit 1; }
  export SteamAppId=1281220 SteamGameId=1281220 ALSOFT_DRIVERS=wasapi
@@ -59,7 +63,7 @@ case "${1:-help}" in
  cd "$game"; exec "$WINE" ./TFA.exe
  ;;
  wine) shift; exec "$WINE" "$@" ;;
- *) echo 'Usage: ./tfa setup | steam | play | wine <arguments>'
- echo 'Optional: TFA_PREFIX=/absolute/path/to/prefix ./tfa steam'
+ *) echo 'Usage: ./gl-support-wine setup | steam | play-tfa | wine <arguments>'
+ echo 'Optional: GL_WINE_PREFIX=/absolute/path/to/prefix ./gl-support-wine steam'
  ;;
 esac

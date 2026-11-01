@@ -46,7 +46,7 @@ for f in sorted(pkg.rglob('*')):
   else:owner='mesa-bridge'
  elif str(rel)=='tools/winetricks':owner='winetricks'
  elif str(rel)=='tools/cabextract':owner='homebrew-cabextract-1.11'
- elif str(rel)=='tfa':owner='release-wrapper'
+ elif str(rel)=='gl-support-wine':owner='release-wrapper'
  if owner:
   assert owner in components,(rel,owner)
   assert (pkg/components[owner]['notices']).is_dir(),owner
